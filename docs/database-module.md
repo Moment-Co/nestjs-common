@@ -6,6 +6,27 @@ Postgres only. Wraps `TypeOrmModule.forRoot` / `forRootAsync` with shared defaul
 
 - App installs **`@nestjs/typeorm`** (Nest 10 + TypeORM 0.3.x) plus this package’s peers: `@nestjs/common`, `@nestjs/core`, `typeorm`.
 - Connection is always **host + port + credentials + database name** (no URL-only option in this helper).
+- For env validation, compose `commonEnvSchema` + `databaseEnvSchema` only in services that use DB.
+
+## Env schema composition
+
+Use DB env keys only where needed:
+
+```typescript
+import { commonEnvSchema, databaseEnvSchema, validateConfig } from '@momentco/nestjs-common';
+
+const schema = commonEnvSchema.merge(databaseEnvSchema);
+const env = validateConfig(schema);
+```
+
+Exporter/no-DB services should use `commonEnvSchema` alone.
+
+Standard DB env keys:
+
+- `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`
+- `DB_SSL`
+- `DB_POOL_MAX`, `DB_POOL_MIN`, `DB_POOL_IDLE_TIMEOUT_MS`, `DB_POOL_CONNECTION_TIMEOUT_MS`
+- `DB_RETRY_ATTEMPTS`, `DB_RETRY_DELAY_MS`
 
 ## API surface
 
@@ -48,7 +69,7 @@ import { DatabaseModule } from '@momentco/nestjs-common';
     DatabaseModule.forRoot({
       host: process.env.DB_HOST!,
       port: Number(process.env.DB_PORT),
-      username: process.env.DB_USER!,
+      username: process.env.DB_USERNAME!,
       password: process.env.DB_PASSWORD!,
       database: process.env.DB_NAME!,
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
@@ -98,7 +119,7 @@ TypeOrmModule.forRootAsync({
       ...{
         pool: { max: cfg.db.pool.max, min: cfg.db.pool.min },
         retryAttempts: cfg.db.retryAttempts,
-        retryDelay: cfg.db.retryDelay,
+        retryDelay: cfg.db.retryDelayMs,
       },
       host: cfg.db.host,
       port: cfg.db.port,
