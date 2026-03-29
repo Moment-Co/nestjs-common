@@ -7,7 +7,7 @@ export function validateConfig<T extends z.ZodTypeAny>(
   const result = schema.safeParse(env);
 
   if (!result.success) {
-    const errors = result.error.errors
+    const errors = result.error.issues
       .map(e => `  ${e.path.join('.')}: ${e.message}`)
       .join('\n');
     throw new Error(`Config validation failed:\n${errors}`);

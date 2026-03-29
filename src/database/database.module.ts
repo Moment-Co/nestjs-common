@@ -1,29 +1,13 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { DatabaseModuleOptions, getPoolConfig } from './database.config';
+import { buildPostgresTypeOrmOptions, DatabaseModuleOptions } from './database.config';
 
 @Module({})
 export class DatabaseModule {
   static forRoot(options: DatabaseModuleOptions): DynamicModule {
-    const pool = getPoolConfig(process.env.NODE_ENV);
-
     return {
       module: DatabaseModule,
-      imports: [
-        TypeOrmModule.forRoot({
-          type: 'postgres',
-          url: options.url,
-          entities: options.entities,
-          synchronize: options.synchronize ?? false,
-          ssl: options.ssl ? { rejectUnauthorized: false } : false,
-          extra: {
-            max: pool.max,
-            min: pool.min,
-            idleTimeoutMillis: pool.idleTimeoutMs,
-            connectionTimeoutMillis: pool.connectionTimeoutMs,
-          },
-        }),
-      ],
+      imports: [TypeOrmModule.forRoot(buildPostgresTypeOrmOptions(options))],
       exports: [TypeOrmModule],
     };
   }
@@ -38,20 +22,7 @@ export class DatabaseModule {
         TypeOrmModule.forRootAsync({
           useFactory: async (...args: unknown[]) => {
             const dbOptions = await options.useFactory(...args);
-            const pool = getPoolConfig(process.env.NODE_ENV);
-            return {
-              type: 'postgres',
-              url: dbOptions.url,
-              entities: dbOptions.entities,
-              synchronize: dbOptions.synchronize ?? false,
-              ssl: dbOptions.ssl ? { rejectUnauthorized: false } : false,
-              extra: {
-                max: pool.max,
-                min: pool.min,
-                idleTimeoutMillis: pool.idleTimeoutMs,
-                connectionTimeoutMillis: pool.connectionTimeoutMs,
-              },
-            };
+            return buildPostgresTypeOrmOptions(dbOptions);
           },
           inject: (options.inject as never[]) ?? [],
         }),

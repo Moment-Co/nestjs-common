@@ -5,7 +5,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { MomentException } from './moment.exception';
 import { MomentErrorCode } from './exception-types';
 import { getRequestId } from '../logging/request-context';
