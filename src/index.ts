@@ -35,6 +35,7 @@ export { MomentErrorCode } from './exceptions/exception-types';
 
 // Config
 export { commonEnvSchema, CommonEnv } from './config/common-env.schema';
+export { databaseEnvSchema, DatabaseEnv } from './config/database-env.schema';
 export { validateConfig } from './config/validate-config';
 
 // Middleware
