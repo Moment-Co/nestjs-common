@@ -95,3 +95,47 @@ import { HttpClientModule } from '@momentco/nestjs-common';
 })
 export class AppModule {}
 ```
+
+## Importer service scenarios
+
+### Scenario A: provider token exchange (form-encoded)
+
+```typescript
+const token = await http.postForm<{ access_token: string }>(
+  '/oauth/token',
+  {
+    grant_type: 'client_credentials',
+    client_id: env.IMPORTER_CLIENT_ID,
+    client_secret: env.IMPORTER_CLIENT_SECRET,
+  },
+  { serviceName: 'providerAuth', timeoutMs: 8000, retries: 1 },
+);
+```
+
+### Scenario B: fire-and-forget sync callbacks (best-effort)
+
+```typescript
+await http.postJson(
+  '/sync/callback',
+  payload,
+  {
+    serviceName: 'consumerApi',
+    fallback: () => ({ ok: false }),
+  },
+);
+```
+
+### Scenario C: importer high-throughput fetch with named profiles
+
+```typescript
+const providerClient = http.forService('providerApi');
+const records = await providerClient.getJson<{ items: unknown[] }>('/imports', {
+  params: { page: 1, limit: 100 },
+});
+```
+
+### Scenario D: map outbound failures to importer exceptions
+
+- retryable upstream failures -> throw `UpstreamServiceException`
+- client/data contract failures -> throw `ValidationException`
+- preserve `requestId` in logs for traceability

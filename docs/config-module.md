@@ -87,3 +87,44 @@ const retryDelayMs = Number(env.DB_RETRY_DELAY_MS);
 - includes per-field details (`path: message`)
 
 Validate during app bootstrap so invalid env fails fast.
+
+## Importer service scenarios
+
+### Scenario A: importer uses DB + Redis + provider credentials
+
+```typescript
+import {
+  commonEnvSchema,
+  databaseEnvSchema,
+  validateConfig,
+} from '@momentco/nestjs-common';
+import { z } from 'zod';
+
+const importerSchema = commonEnvSchema.merge(databaseEnvSchema).extend({
+  IMPORTER_PROVIDER_BASE_URL: z.string().url(),
+  IMPORTER_PROVIDER_API_KEY: z.string().min(1),
+  IMPORTER_BATCH_SIZE: z.string().regex(/^\d+$/).default('100'),
+});
+
+export const env = validateConfig(importerSchema);
+```
+
+### Scenario B: importer worker without DB
+
+Use `commonEnvSchema` + worker-specific keys only.
+
+```typescript
+const workerSchema = commonEnvSchema.extend({
+  IMPORTER_QUEUE_NAME: z.string().min(1),
+});
+```
+
+### Scenario C: convert once, then export runtime config
+
+```typescript
+export const importerConfig = {
+  port: Number(env.PORT),
+  dbPort: Number(env.DB_PORT),
+  batchSize: Number(env.IMPORTER_BATCH_SIZE),
+};
+```

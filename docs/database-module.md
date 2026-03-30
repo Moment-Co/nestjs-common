@@ -158,3 +158,41 @@ Map app config fields to **`idleTimeoutMs`** / **`connectionTimeoutMs`** when fi
 ## Exports
 
 `DatabaseModule` re-exports **`TypeOrmModule`** so feature modules can use `TypeOrmModule.forFeature(...)` after importing `DatabaseModule`.
+
+## Importer service scenarios
+
+### Scenario A: default importer database setup
+
+```typescript
+DatabaseModule.forRootAsync({
+  useFactory: () => ({
+    ...POSTGRES_DATABASE_DEFAULTS,
+    host: process.env.DB_HOST!,
+    port: Number(process.env.DB_PORT),
+    username: process.env.DB_USERNAME!,
+    password: process.env.DB_PASSWORD!,
+    database: process.env.DB_NAME!,
+    entities: [__dirname + '/../**/*.entity{.ts,.js}'],
+  }),
+});
+```
+
+### Scenario B: large import jobs need bigger pool and longer timeout
+
+```typescript
+{
+  ...POSTGRES_DATABASE_DEFAULTS,
+  pool: {
+    max: 15,
+    min: 2,
+    idleTimeoutMs: 30000,
+    connectionTimeoutMs: 10000,
+  },
+}
+```
+
+### Scenario C: strict migration mode in importer API
+
+- keep `synchronize: false`
+- set `migrations` and `migrationsTableName`
+- keep `migrationsRun: false` for explicit migration control in CI/CD
