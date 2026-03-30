@@ -11,8 +11,17 @@ export {
 
 // HTTP Client
 export { HttpClientModule } from './http-client/http-client.module';
-export { HttpClientService, HttpClientOptions, RequestOptions } from './http-client/http-client.service';
-export { HttpClientException, HttpErrorType } from './http-client/http-client.exception';
+export {
+  createHttpClient,
+  CircuitBreakerPolicy,
+  HttpClientOptions,
+  HttpClientService,
+  HttpLogHook,
+  HttpMetricsHook,
+  NamedHttpClientProfile,
+  RequestOptions,
+} from './http-client/http-client.service';
+export { ExternalHttpError, HttpClientException, HttpErrorType } from './http-client/http-client.exception';
 
 // Logging — NestJS
 export { LoggerModule } from './logging/logger.module';
