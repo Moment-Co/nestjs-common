@@ -1,4 +1,5 @@
 import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
+import type { DatabaseEnv } from '../config/database-env.schema';
 
 export interface PoolConfig {
   max: number;
@@ -17,21 +18,11 @@ export function getPoolConfig(env: string = process.env.NODE_ENV ?? 'development
   };
 }
 
-/**
- * Default TypeORM/Nest-related choices and pool sizing for Postgres.
- * `pool` uses {@link getPoolConfig} at module load (`NODE_ENV` at first import).
- *
- * In the app: `const policy = { ...POSTGRES_DATABASE_DEFAULTS, ...overrides }`, then pass
- * `{ ...policy, host, port, username, password, database, entities, migrations?, migrationsTableName? }`
- * to {@link buildPostgresTypeOrmOptions}. Partial `pool` overrides are merged with these defaults.
- */
-export interface PostgresDatabaseDefaults {
+interface PostgresDatabaseDefaults {
   synchronize: boolean;
-  /** When true, {@link buildPostgresTypeOrmOptions} maps to `ssl: { rejectUnauthorized: false }`. */
   ssl: boolean;
   pool: PoolConfig;
   migrationsRun: boolean;
-  /** Matches Nest `TypeOrmModule` default retry behaviour unless overridden. */
   retryAttempts: number;
   retryDelay: number;
 }
@@ -45,15 +36,11 @@ export const POSTGRES_DATABASE_DEFAULTS: PostgresDatabaseDefaults = {
   retryDelay: 3000,
 };
 
-/**
- * Connection, entities, optional migrations, plus any subset of {@link PostgresDatabaseDefaults}
- * (typically spread from {@link POSTGRES_DATABASE_DEFAULTS} and app overrides).
- */
 type DatabasePolicyOverrides = Omit<PostgresDatabaseDefaults, 'pool'> & {
   pool: Partial<PoolConfig>;
 };
 
-export type DatabaseModuleOptions = {
+type DatabaseModuleOptionsDiscrete = {
   host: string;
   port: number;
   username: string;
@@ -64,6 +51,22 @@ export type DatabaseModuleOptions = {
   migrationsTableName?: string;
 } & Partial<DatabasePolicyOverrides>;
 
+type DatabaseModuleOptionsUrl = {
+  url: string;
+  entities: string[];
+  migrations?: string[];
+  migrationsTableName?: string;
+} & Partial<DatabasePolicyOverrides>;
+
+/** Discrete connection or `url` + `entities`; never both connection styles. */
+export type DatabaseModuleOptions = DatabaseModuleOptionsDiscrete | DatabaseModuleOptionsUrl;
+
+export type DatabaseModuleLayout = {
+  entities: string[];
+  migrations?: string[];
+  migrationsTableName?: string;
+};
+
 function poolToExtra(pool: PoolConfig): Record<string, number> {
   return {
     max: pool.max,
@@ -73,22 +76,84 @@ function poolToExtra(pool: PoolConfig): Record<string, number> {
   };
 }
 
+function assertConnectionMode(options: DatabaseModuleOptions): void {
+  const hasUrl = 'url' in options && options.url !== undefined && options.url !== '';
+  const hasDiscrete =
+    'host' in options &&
+    (options as DatabaseModuleOptionsDiscrete).host !== undefined &&
+    (options as DatabaseModuleOptionsDiscrete).host !== '';
+  if (hasUrl && hasDiscrete) {
+    throw new Error(
+      'DatabaseModuleOptions: provide either url or discrete host/port/username/password/database, not both',
+    );
+  }
+  if (!hasUrl && !hasDiscrete) {
+    throw new Error(
+      'DatabaseModuleOptions: provide either url or discrete host, port, username, password, database',
+    );
+  }
+}
+
+/** Maps `DatabaseEnv` + layout to discrete options (same mapping as `DatabaseModule.forRootFromEnv`). */
+export function databaseEnvToModuleOptions(
+  env: DatabaseEnv,
+  layout: DatabaseModuleLayout,
+): DatabaseModuleOptionsDiscrete {
+  return {
+    host: env.DB_HOST,
+    port: Number(env.DB_PORT),
+    username: env.DB_USERNAME,
+    password: env.DB_PASSWORD,
+    database: env.DB_NAME,
+    entities: layout.entities,
+    ...(layout.migrations !== undefined ? { migrations: layout.migrations } : {}),
+    ...(layout.migrationsTableName !== undefined
+      ? { migrationsTableName: layout.migrationsTableName }
+      : {}),
+    ssl: env.DB_SSL === 'true',
+    pool: {
+      max: Number(env.DB_POOL_MAX),
+      min: Number(env.DB_POOL_MIN),
+      idleTimeoutMs: Number(env.DB_POOL_IDLE_TIMEOUT_MS),
+      connectionTimeoutMs: Number(env.DB_POOL_CONNECTION_TIMEOUT_MS),
+    },
+    retryAttempts: Number(env.DB_RETRY_ATTEMPTS),
+    retryDelay: Number(env.DB_RETRY_DELAY_MS),
+  };
+}
+
 /**
- * Builds Nest `TypeOrmModuleOptions` for Postgres. Merges {@link POSTGRES_DATABASE_DEFAULTS} with
- * `options` for policy fields; `pool` is merged deeply so partial overrides keep remaining defaults.
+ * Shallow merge of `overrides` onto `base`; when `overrides.pool` is set, deep-merges `pool`
+ * with `POSTGRES_DATABASE_DEFAULTS.pool` and `base.pool`.
  */
+export function mergeDatabaseModuleOptions(
+  base: DatabaseModuleOptions,
+  overrides?: Partial<DatabaseModuleOptions>,
+): DatabaseModuleOptions {
+  if (!overrides) return base;
+  const merged = { ...base, ...overrides } as DatabaseModuleOptions;
+  if (overrides.pool === undefined) {
+    return merged;
+  }
+  return {
+    ...merged,
+    pool: {
+      ...POSTGRES_DATABASE_DEFAULTS.pool,
+      ...('pool' in base && base.pool ? base.pool : {}),
+      ...overrides.pool,
+    },
+  } as DatabaseModuleOptions;
+}
+
+/** Nest TypeORM options for Postgres; merges `POSTGRES_DATABASE_DEFAULTS`, discrete or `url` connection. */
 export function buildPostgresTypeOrmOptions(options: DatabaseModuleOptions): TypeOrmModuleOptions {
+  assertConnectionMode(options);
   const defaults = POSTGRES_DATABASE_DEFAULTS;
   const pool: PoolConfig = { ...defaults.pool, ...options.pool };
   const ssl = options.ssl ?? defaults.ssl;
 
-  return {
-    type: 'postgres',
-    host: options.host,
-    port: options.port,
-    username: options.username,
-    password: options.password,
-    database: options.database,
+  const baseOrm = {
+    type: 'postgres' as const,
     entities: options.entities,
     synchronize: options.synchronize ?? defaults.synchronize,
     ssl: ssl ? { rejectUnauthorized: false } : false,
@@ -100,5 +165,22 @@ export function buildPostgresTypeOrmOptions(options: DatabaseModuleOptions): Typ
     ...(options.migrationsTableName !== undefined
       ? { migrationsTableName: options.migrationsTableName }
       : {}),
+  };
+
+  if ('url' in options && options.url !== undefined && options.url !== '') {
+    return {
+      ...baseOrm,
+      url: options.url,
+    };
+  }
+
+  const d = options as DatabaseModuleOptionsDiscrete;
+  return {
+    ...baseOrm,
+    host: d.host,
+    port: d.port,
+    username: d.username,
+    password: d.password,
+    database: d.database,
   };
 }

@@ -1,6 +1,13 @@
-import { DynamicModule, Module } from '@nestjs/common';
+import { DynamicModule, Module, ModuleMetadata } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { buildPostgresTypeOrmOptions, DatabaseModuleOptions } from './database.config';
+import type { DatabaseEnv } from '../config/database-env.schema';
+import {
+  buildPostgresTypeOrmOptions,
+  DatabaseModuleLayout,
+  DatabaseModuleOptions,
+  databaseEnvToModuleOptions,
+  mergeDatabaseModuleOptions,
+} from './database.config';
 
 @Module({})
 export class DatabaseModule {
@@ -12,7 +19,17 @@ export class DatabaseModule {
     };
   }
 
+  static forRootFromEnv(
+    env: DatabaseEnv,
+    layout: DatabaseModuleLayout,
+    overrides?: Partial<DatabaseModuleOptions>,
+  ): DynamicModule {
+    const merged = mergeDatabaseModuleOptions(databaseEnvToModuleOptions(env, layout), overrides);
+    return DatabaseModule.forRoot(merged);
+  }
+
   static forRootAsync(options: {
+    imports?: ModuleMetadata['imports'];
     useFactory: (...args: unknown[]) => DatabaseModuleOptions | Promise<DatabaseModuleOptions>;
     inject?: unknown[];
   }): DynamicModule {
@@ -20,6 +37,7 @@ export class DatabaseModule {
       module: DatabaseModule,
       imports: [
         TypeOrmModule.forRootAsync({
+          imports: options.imports ?? [],
           useFactory: async (...args: unknown[]) => {
             const dbOptions = await options.useFactory(...args);
             return buildPostgresTypeOrmOptions(dbOptions);

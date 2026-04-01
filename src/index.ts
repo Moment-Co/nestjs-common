@@ -2,11 +2,13 @@
 export { DatabaseModule } from './database/database.module';
 export {
   buildPostgresTypeOrmOptions,
+  databaseEnvToModuleOptions,
+  mergeDatabaseModuleOptions,
+  DatabaseModuleLayout,
   DatabaseModuleOptions,
   getPoolConfig,
   PoolConfig,
   POSTGRES_DATABASE_DEFAULTS,
-  PostgresDatabaseDefaults,
 } from './database/database.config';
 
 // HTTP Client

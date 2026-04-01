@@ -1,6 +1,8 @@
 import {
   buildPostgresTypeOrmOptions,
+  databaseEnvToModuleOptions,
   getPoolConfig,
+  mergeDatabaseModuleOptions,
   POSTGRES_DATABASE_DEFAULTS,
 } from '../../src/database/database.config';
 import { databaseEnvSchema } from '../../src/config/database-env.schema';
@@ -142,5 +144,63 @@ describe('database.config', () => {
         DB_NAME: 'momentco_platform',
       }),
     ).toThrow('Config validation failed');
+  });
+
+  it('builds options from connection url', () => {
+    const result = buildPostgresTypeOrmOptions({
+      url: 'postgres://u:p@localhost:5432/mydb',
+      entities: ['dist/**/*.entity.js'],
+    });
+
+    expect(result).toMatchObject({
+      type: 'postgres',
+      url: 'postgres://u:p@localhost:5432/mydb',
+      entities: ['dist/**/*.entity.js'],
+    });
+    expect(result).not.toHaveProperty('host');
+  });
+
+  it('rejects url and discrete connection together', () => {
+    expect(() =>
+      buildPostgresTypeOrmOptions({
+        url: 'postgres://localhost/db',
+        host: 'localhost',
+        port: 5432,
+        username: 'u',
+        password: 'p',
+        database: 'db',
+        entities: ['x'],
+      } as never),
+    ).toThrow('not both');
+  });
+
+  it('maps databaseEnvToModuleOptions and mergeDatabaseModuleOptions partial pool', () => {
+    const env = validateConfig(databaseEnvSchema, {
+      DB_HOST: 'localhost',
+      DB_PORT: '5432',
+      DB_USERNAME: 'postgres',
+      DB_PASSWORD: 'secret',
+      DB_NAME: 'momentco_platform',
+      DB_SSL: 'false',
+      DB_POOL_MAX: '5',
+      DB_POOL_MIN: '1',
+      DB_POOL_IDLE_TIMEOUT_MS: '10000',
+      DB_POOL_CONNECTION_TIMEOUT_MS: '5000',
+      DB_RETRY_ATTEMPTS: '10',
+      DB_RETRY_DELAY_MS: '3000',
+    });
+
+    const base = databaseEnvToModuleOptions(env, {
+      entities: ['dist/**/*.entity.js'],
+      migrations: ['migrations/*.js'],
+      migrationsTableName: 'migrations',
+    });
+
+    const merged = mergeDatabaseModuleOptions(base, { pool: { max: 20 } });
+
+    const result = buildPostgresTypeOrmOptions(merged);
+    expect(result.extra?.max).toBe(20);
+    expect(result.extra?.min).toBe(1);
+    expect(result.migrations).toEqual(['migrations/*.js']);
   });
 });

@@ -17,7 +17,7 @@ Shared NestJS infrastructure library for Momentco services.
 pnpm add @momentco/nestjs-common
 ```
 
-Ensure peer dependencies are installed in the consuming service (`@nestjs/common`, `@nestjs/core`, `typeorm`, and `@nestjs/typeorm` where DB module is used).
+Ensure peer dependencies are installed in the consuming service (`@nestjs/common`, `@nestjs/core`, `typeorm`, and `@nestjs/typeorm` where DB module is used). **NestJS:** peers are declared for **v10 or v11** (`^10.0.0 || ^11.0.0`); use the `@nestjs/*` major that matches your app (e.g. `@nestjs/typeorm` 11 with Nest 11).
 
 ## Build and test (this repo)
 
