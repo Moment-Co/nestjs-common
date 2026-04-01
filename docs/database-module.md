@@ -48,7 +48,7 @@ Database-related keys are defined by **`databaseEnvSchema`**. Full list and defa
 - `DB_POOL_MAX`, `DB_POOL_MIN`, `DB_POOL_IDLE_TIMEOUT_MS`, `DB_POOL_CONNECTION_TIMEOUT_MS`
 - `DB_RETRY_ATTEMPTS`, `DB_RETRY_DELAY_MS`
 
-If you merge **`commonEnvSchema.merge(databaseEnvSchema)`**, you must also satisfy **`commonEnvSchema`** (e.g. **`REDIS_URL`** is required there). For a **database-only** microservice that should not pull Redis, validate **`databaseEnvSchema`** alone instead of the merge.
+If you merge **`commonEnvSchema.merge(databaseEnvSchema)`**, you must satisfy every key in both schemas (shared keys like **`NODE_ENV`**, **`PORT`**, **`LOG_LEVEL`**, plus all **`DB_*`**). For a **database-only** service that does not need the shared keys, validate **`databaseEnvSchema`** alone instead (Pattern B).
 
 ---
 
@@ -69,12 +69,12 @@ import {
   validateConfig,
 } from '@momentco/nestjs-common';
 
-// Single schema: shared keys (NODE_ENV, PORT, LOG_LEVEL, REDIS_URL, …) + DB_*.
+// Single schema: shared keys (NODE_ENV, PORT, LOG_LEVEL) + DB_*.
 // validateConfig() reads process.env, validates, applies defaults, returns a typed object or throws.
 const env = validateConfig(commonEnvSchema.merge(databaseEnvSchema));
 ```
 
-**Pattern B — DB keys only (e.g. worker without Redis in common schema)**
+**Pattern B — DB keys only (minimal env; no `commonEnvSchema` keys)**
 
 ```typescript
 import { databaseEnvSchema, validateConfig } from '@momentco/nestjs-common';
@@ -274,7 +274,7 @@ With **`forRootFromEnv`**, **`DB_POOL_*`** and **`DB_RETRY_*`** from env are app
 | **`AppConfigService`** undefined inside **`forRootAsync`** | **`imports: [AppConfigModule]`** (or the module that exports the service) must be present on **`forRootAsync`**. |
 | Error about **url** and **discrete** together | Return only **`url`** **or** only host/port/user/password/database, not both. |
 | Pool sizes unexpected | **`NODE_ENV`** at **first import** affects **`POSTGRES_DATABASE_DEFAULTS.pool`**; **`forRootFromEnv`** also sets pool from **`DB_POOL_*`**. Override explicitly in the third argument if needed. |
-| **`validateConfig`** fails on Redis | You used **`commonEnvSchema.merge(databaseEnvSchema)`** — set **`REDIS_URL`** or use **`databaseEnvSchema`** alone (Pattern B). |
+| **`validateConfig`** fails on missing **`DB_*`** | Ensure all required database env vars are set, or use **`databaseEnvSchema`** only if you do not merge with **`commonEnvSchema`**. |
 
 ---
 

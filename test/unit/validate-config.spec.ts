@@ -8,15 +8,16 @@ describe('validateConfig', () => {
       NODE_ENV: 'development',
       PORT: '3000',
       LOG_LEVEL: 'info',
-      REDIS_URL: 'redis://localhost:6379',
     });
     expect(result.PORT).toBe('3000');
   });
 
-  it('throws with missing REDIS_URL in common env', () => {
+  it('throws with invalid NODE_ENV in common env', () => {
     expect(() =>
       validateConfig(commonEnvSchema, {
-        NODE_ENV: 'development',
+        NODE_ENV: 'invalid',
+        PORT: '3000',
+        LOG_LEVEL: 'info',
       }),
     ).toThrow('Config validation failed');
   });

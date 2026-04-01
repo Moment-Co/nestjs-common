@@ -15,7 +15,8 @@ Use Zod schemas from `@momentco/nestjs-common` to validate env once at startup.
 - `NODE_ENV`: `development | production | test` (default: `development`)
 - `PORT`: numeric string (default: `3000`)
 - `LOG_LEVEL`: `error | warn | info | debug | verbose` (default: `info`)
-- `REDIS_URL`: URL string (required)
+
+Redis, queues, and other integrations are not part of `commonEnvSchema`; extend with your own Zod fields (e.g. `REDIS_URL`) in the consuming service.
 
 ## `databaseEnvSchema` keys
 
@@ -90,7 +91,7 @@ Validate during app bootstrap so invalid env fails fast.
 
 ## Importer service scenarios
 
-### Scenario A: importer uses DB + Redis + provider credentials
+### Scenario A: importer uses DB + provider credentials
 
 ```typescript
 import {
