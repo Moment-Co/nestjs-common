@@ -49,5 +49,14 @@ export { commonEnvSchema, CommonEnv } from './config/common-env.schema';
 export { databaseEnvSchema, DatabaseEnv } from './config/database-env.schema';
 export { validateConfig } from './config/validate-config';
 
+// Health
+export {
+  HealthCheckStatus,
+  HealthCheckDetail,
+  HealthCheckResponse,
+  AggregatedHealthResult,
+} from './health/health.types';
+export { aggregateHealth } from './health/aggregate-health';
+
 // Middleware
 export { RequestIdMiddleware } from './middleware/request-id.middleware';

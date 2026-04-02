@@ -1,6 +1,6 @@
 {
   "name": "@momentco/nestjs-common",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "description": "Shared NestJS infrastructure primitives for Momentco services",
   "packageManager": "pnpm@9.15.4",
   "main": "dist/index.js",
