@@ -17,7 +17,13 @@
   "peerDependencies": {
     "@nestjs/common": "^10.0.0 || ^11.0.0",
     "@nestjs/core": "^10.0.0 || ^11.0.0",
+    "ioredis": "^5.0.0",
     "typeorm": "^0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "ioredis": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@nestjs/common": "^11.0.0",

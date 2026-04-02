@@ -49,14 +49,29 @@ export { commonEnvSchema, CommonEnv } from './config/common-env.schema';
 export { databaseEnvSchema, DatabaseEnv } from './config/database-env.schema';
 export { validateConfig } from './config/validate-config';
 
-// Health
+// Health (see `./health/index.ts` for layout)
 export {
   HealthCheckStatus,
   HealthCheckDetail,
   HealthCheckResponse,
   AggregatedHealthResult,
-} from './health/health.types';
-export { aggregateHealth } from './health/aggregate-health';
+  aggregateHealth,
+  HealthModule,
+  HealthAggregatorService,
+  HEALTH_MODULE_OPTIONS,
+  assertHealthModuleOptions,
+  createHealthController,
+  rejectAfter,
+  DatabaseHealthCheck,
+  RedisHealthCheck,
+  HEALTH_REDIS_CLIENT,
+} from './health';
+export type {
+  HealthCheck,
+  HealthModuleOptions,
+  HealthCheckRegistration,
+  RedisPingClient,
+} from './health';
 
 // Middleware
 export { RequestIdMiddleware } from './middleware/request-id.middleware';

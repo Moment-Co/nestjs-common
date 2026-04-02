@@ -1,8 +1,8 @@
-import {
+import type {
   AggregatedHealthResult,
   HealthCheckDetail,
   HealthCheckStatus,
-} from './health.types';
+} from './types';
 
 /**
  * Aggregates individual health-check results into a single response body
