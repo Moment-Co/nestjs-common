@@ -1,6 +1,6 @@
 {
   "name": "@momentco/nestjs-common",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Shared NestJS infrastructure primitives for Momentco services",
   "packageManager": "pnpm@9.15.4",
   "main": "dist/index.js",
@@ -20,10 +20,14 @@
     "@nestjs/common": "^10.0.0 || ^11.0.0",
     "@nestjs/core": "^10.0.0 || ^11.0.0",
     "@nestjs/swagger": "^10.0.0 || ^11.0.0",
+    "@google-cloud/pubsub": "^4.0.0",
     "ioredis": "^5.0.0",
     "typeorm": "^0.3.0"
   },
   "peerDependenciesMeta": {
+    "@google-cloud/pubsub": {
+      "optional": true
+    },
     "@nestjs/swagger": {
       "optional": true
     },

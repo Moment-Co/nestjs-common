@@ -37,6 +37,11 @@ You can use the **built-in** TypeORM and Redis checks from this package, impleme
 | `RedisHealthCheck` | Built-in: `PING` via injected `RedisPingClient` (`HEALTH_REDIS_CLIENT` token) |
 | `HEALTH_REDIS_CLIENT` | Injection token for the Redis client used by `RedisHealthCheck` |
 | `RedisPingClient` | Type: `{ ping(): Promise<string> }` (compatible with `ioredis`) |
+| `PubSubHealthCheck` | Built-in: `getTopics({ pageSize: 1 })` via `PubSubPingClient` (`HEALTH_PUBSUB_CLIENT`) |
+| `HEALTH_PUBSUB_CLIENT` | Injection token for the Pub/Sub client used by `PubSubHealthCheck` |
+| `PubSubPingClient` | Minimal type for `PubSub#getTopics` (returns `Promise<unknown>`) |
+| `RedisHealthModule` | Optional `register()` dynamic module — wires `HEALTH_REDIS_CLIENT` with dynamic `ioredis` load |
+| `PubSubHealthModule` | Optional `register()` dynamic module — wires `HEALTH_PUBSUB_CLIENT` with dynamic `@google-cloud/pubsub` load |
 
 ## Built-in checks
 
@@ -51,7 +56,7 @@ checks: [{ key: 'database', useClass: DatabaseHealthCheck }],
 
 ### `RedisHealthCheck`
 
-- **Requires:** A client implementing `RedisPingClient` (typically `ioredis`) registered under the **`HEALTH_REDIS_CLIENT`** token in a module you pass via `HealthModule.forRoot({ imports: [...] })`, or in a `@Global()` module.
+- **Requires:** A client implementing `RedisPingClient` (typically `ioredis`) registered under **`HEALTH_REDIS_CLIENT`**, or use **`RedisHealthModule.register()`** which loads `ioredis` dynamically and reads `options.url` / `process.env.REDIS_URL`.
 - **Behavior:** `PING` with a 3s timeout. If no client is injected, returns `fail` with error `"Redis not configured"` (often registered as a **non-critical** check).
 
 ```typescript
@@ -59,14 +64,13 @@ import {
   HealthModule,
   RedisHealthCheck,
   DatabaseHealthCheck,
-  HEALTH_REDIS_CLIENT,
+  RedisHealthModule,
 } from '@momentco/nestjs-common';
-import Redis from 'ioredis';
 
 @Module({
   imports: [
     HealthModule.forRoot({
-      imports: [RedisHealthModule], // provides HEALTH_REDIS_CLIENT — see below
+      imports: [RedisHealthModule.register()],
       checks: [
         { key: 'database', useClass: DatabaseHealthCheck },
         { key: 'redis', useClass: RedisHealthCheck },
@@ -76,24 +80,36 @@ import Redis from 'ioredis';
   ],
 })
 export class AppModule {}
+```
 
-// Example: small module that exports the client token
+You can still bind **`HEALTH_REDIS_CLIENT`** yourself if you need custom Redis options.
+
+### `PubSubHealthCheck`
+
+- **Requires:** A client implementing **`PubSubPingClient`** under **`HEALTH_PUBSUB_CLIENT`**, or **`PubSubHealthModule.register()`** which loads `@google-cloud/pubsub` dynamically and uses `options.projectId` / `process.env.GCP_PROJECT_ID` / `process.env.GOOGLE_CLOUD_PROJECT`.
+- **Behavior:** Calls `getTopics({ pageSize: 1 })` (read-only list; no publish). 3s timeout. If no client, fails with `"Pub/Sub not configured"`. Ensure the runtime identity has **`pubsub.topics.list`** (or equivalent) if you rely on this check.
+
+```typescript
+import {
+  HealthModule,
+  PubSubHealthCheck,
+  PubSubHealthModule,
+  DatabaseHealthCheck,
+} from '@momentco/nestjs-common';
+
 @Module({
-  providers: [
-    {
-      provide: HEALTH_REDIS_CLIENT,
-      useFactory: () =>
-        new Redis(process.env.REDIS_URL!, {
-          lazyConnect: true,
-          maxRetriesPerRequest: 1,
-          connectTimeout: 3_000,
-          enableReadyCheck: false,
-        }),
-    },
+  imports: [
+    HealthModule.forRoot({
+      imports: [PubSubHealthModule.register()],
+      checks: [
+        { key: 'database', useClass: DatabaseHealthCheck },
+        { key: 'pubsub', useClass: PubSubHealthCheck },
+      ],
+      criticalKeys: ['database'],
+    }),
   ],
-  exports: [HEALTH_REDIS_CLIENT],
 })
-export class RedisHealthModule {}
+export class AppModule {}
 ```
 
 ## Aggregation rules
@@ -245,14 +261,15 @@ If you need a second route (for example internal vs public), you can keep using 
 - **Unit tests:** Mock each `HealthCheck` with `useValue: { check: jest.fn() }` and register them as you would any provider, or test `aggregateHealth` directly with a fake `Record<string, HealthCheckDetail>`.
 - **E2E:** Bootstrap `HealthModule.forRoot({ ... })` with a test app and `GET` the configured path.
 
-In this repository, unit tests that mirror this document live under `test/unit/`: `health.module.spec.ts` (HTTP module, `forRoot` / `forRootAsync`, env identity, mocks), `aggregate-health.spec.ts`, `health.options.spec.ts` (`assertHealthModuleOptions`), `health.utils.spec.ts` (`rejectAfter`), `database.health.spec.ts`, and `redis.health.spec.ts`.
+In this repository, unit tests that mirror this document live under `test/unit/`: `health.module.spec.ts` (HTTP module, `forRoot` / `forRootAsync`, env identity, mocks), `aggregate-health.spec.ts`, `health.options.spec.ts` (`assertHealthModuleOptions`), `health.utils.spec.ts` (`rejectAfter`), `database.health.spec.ts`, `redis.health.spec.ts`, `pubsub.health.spec.ts`, `redis-health.module.spec.ts`, and `pubsub-health.module.spec.ts`.
 
 ## Related
 
 - Source layout under `src/health/`:
   - `core/` — DTO/types, `aggregateHealth`, module options, `HEALTH_MODULE_OPTIONS`, `rejectAfter`
   - `http/` — `HealthAggregatorService`, `createHealthController`
-  - `checks/` — built-in probes (`DatabaseHealthCheck`, `RedisHealthCheck`, …)
+  - `checks/` — built-in probes (`DatabaseHealthCheck`, `RedisHealthCheck`, `PubSubHealthCheck`, …)
+  - `providers/` — `RedisHealthModule`, `PubSubHealthModule` (`register()` helpers)
   - `health.module.ts` — dynamic Nest module
   - `index.ts` — feature barrel re-exports
-- No `@nestjs/terminus` or OpenAPI decorators are required; add Swagger decorators in your app if you document the route.
+- `@nestjs/terminus` is not used. The HTTP controller adds OpenAPI metadata when `@nestjs/swagger` is installed (optional peer); otherwise decorators are no-ops.
