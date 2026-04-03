@@ -65,12 +65,19 @@ export {
   DatabaseHealthCheck,
   RedisHealthCheck,
   HEALTH_REDIS_CLIENT,
+  PubSubHealthCheck,
+  HEALTH_PUBSUB_CLIENT,
+  PubSubHealthModule,
+  RedisHealthModule,
 } from './health';
 export type {
   HealthCheck,
   HealthModuleOptions,
   HealthCheckRegistration,
   RedisPingClient,
+  PubSubPingClient,
+  PubSubHealthModuleOptions,
+  RedisHealthModuleOptions,
 } from './health';
 
 // Middleware

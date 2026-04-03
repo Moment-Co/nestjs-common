@@ -2,7 +2,8 @@
  * Health feature — structured layout:
  * - `core/` — types, aggregation, module options, tokens, utils
  * - `http/` — HTTP controller and aggregator service
- * - `checks/` — built-in probes (database, redis, …)
+ * - `checks/` — built-in probes (database, redis, pubsub, …)
+ * - `providers/` — optional `register()` helpers for Redis / Pub/Sub clients
  */
 
 export type {
@@ -26,3 +27,16 @@ export {
   HEALTH_REDIS_CLIENT,
   type RedisPingClient,
 } from './checks/redis.health';
+export {
+  PubSubHealthCheck,
+  HEALTH_PUBSUB_CLIENT,
+  type PubSubPingClient,
+} from './checks/pubsub.health';
+export {
+  PubSubHealthModule,
+  type PubSubHealthModuleOptions,
+} from './providers/pubsub-health.module';
+export {
+  RedisHealthModule,
+  type RedisHealthModuleOptions,
+} from './providers/redis-health.module';
