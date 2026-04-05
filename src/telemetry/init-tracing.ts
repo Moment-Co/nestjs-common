@@ -23,13 +23,13 @@ export function initTracing(options: TracingOptions): void {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { NodeSDK } = require('@opentelemetry/sdk-node');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Resource } = require('@opentelemetry/resources');
+  const { resourceFromAttributes } = require('@opentelemetry/resources');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = require('@opentelemetry/semantic-conventions');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
 
-  const resource = new Resource({
+  const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: options.serviceName,
     ...(options.serviceVersion && { [ATTR_SERVICE_VERSION]: options.serviceVersion }),
   });
