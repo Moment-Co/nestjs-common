@@ -1,0 +1,1 @@
+export const TELEMETRY_OPTIONS = Symbol('TELEMETRY_OPTIONS');

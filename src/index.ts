@@ -69,6 +69,11 @@ export {
   HEALTH_PUBSUB_CLIENT,
   PubSubHealthModule,
   RedisHealthModule,
+  FirestoreHealthCheck,
+  HEALTH_FIRESTORE_CLIENT,
+  FIRESTORE_HEALTH_PROBE_COLLECTION,
+  FIRESTORE_HEALTH_PROBE_DOC,
+  FirestoreHealthModule,
 } from './health';
 export type {
   HealthCheck,
@@ -78,7 +83,27 @@ export type {
   PubSubPingClient,
   PubSubHealthModuleOptions,
   RedisHealthModuleOptions,
+  FirestorePingClient,
+  FirestoreHealthModuleOptions,
 } from './health';
+
+// Telemetry
+export {
+  initTracing,
+  startProfiler,
+  TelemetryModule,
+  GcpErrorReporter,
+  GcpExceptionFilter,
+  TELEMETRY_OPTIONS,
+  isGcpEnvironment,
+} from './telemetry';
+export type {
+  TracingOptions,
+  ProfilerOptions,
+  ErrorReportingOptions,
+  GcpLoggingTransportOptions,
+} from './telemetry';
+export { createGcpLoggingTransport } from './logging/gcp-logging.transport';
 
 // Middleware
 export { RequestIdMiddleware } from './middleware/request-id.middleware';

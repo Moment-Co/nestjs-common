@@ -10,6 +10,7 @@ Shared NestJS infrastructure library for Momentco services.
 - Config validation utilities and standard env schemas
 - Database module helpers for Postgres + TypeORM
 - Request-id middleware
+- GCP telemetry: OpenTelemetry tracing/metrics, Cloud Logging, Error Reporting, Cloud Profiler
 
 ## Install
 
@@ -49,6 +50,7 @@ import {
 - HTTP client module: [`docs/http-client-module.md`](docs/http-client-module.md)
 - Logger module: [`docs/logger-module.md`](docs/logger-module.md)
 - Exceptions module: [`docs/exceptions-module.md`](docs/exceptions-module.md)
+- Telemetry module: [`docs/telemetry-module.md`](docs/telemetry-module.md)
 
 ## Typical integration order (new service)
 
@@ -56,6 +58,7 @@ import {
 2. Initialize `LoggerModule` and apply `RequestIdMiddleware`
 3. Initialize `DatabaseModule` (if service uses DB)
 4. Initialize `HttpClientModule` with named profiles for outbound dependencies
-5. Register `MomentExceptionFilter` globally
+5. Register `MomentExceptionFilter` globally (or use `TelemetryModule` for GCP error reporting)
+6. (Optional) Add `initTracing` and `startProfiler` for GCP APM
 
 For concrete scenarios and code snippets, use the docs links above.

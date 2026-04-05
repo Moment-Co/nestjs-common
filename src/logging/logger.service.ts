@@ -5,6 +5,8 @@ import { getRequestId } from './request-context';
 export interface LoggerOptions {
   service: string;
   level?: string;
+  /** Extra Winston transports (e.g. GCP Cloud Logging). `undefined` entries are filtered out. */
+  transports?: (winston.transport | undefined)[];
 }
 
 // Plain factory — usable outside NestJS (Cloud Functions, url-shortener)
@@ -27,7 +29,10 @@ export function createLogger(options: LoggerOptions): winston.Logger {
           winston.format.timestamp(),
           winston.format.json(),
         ),
-    transports: [new winston.transports.Console()],
+    transports: [
+      new winston.transports.Console(),
+      ...(options.transports ?? []).filter((t): t is winston.transport => !!t),
+    ],
   });
 }
 
