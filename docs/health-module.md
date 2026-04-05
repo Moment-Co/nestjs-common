@@ -2,7 +2,7 @@
 
 Pluggable HTTP health checks for NestJS apps: you register small **check classes** (database, Redis, Pub/Sub, etc.), and the module exposes a single endpoint that runs them in parallel and returns a consolidated JSON body with optional **critical** vs **non-critical** semantics.
 
-You can use the **built-in** TypeORM and Redis checks from this package, implement `HealthCheck` yourself for other systems (Pub/Sub, HTTP, etc.), or both.
+You can use the **built-in** TypeORM, Redis, Pub/Sub, and Firestore checks from this package, implement `HealthCheck` yourself for other systems, or both.
 
 ## Getting started
 
@@ -42,6 +42,11 @@ You can use the **built-in** TypeORM and Redis checks from this package, impleme
 | `PubSubPingClient` | Minimal type for `PubSub#getTopics` (returns `Promise<unknown>`) |
 | `RedisHealthModule` | Optional `register()` dynamic module — wires `HEALTH_REDIS_CLIENT` with dynamic `ioredis` load |
 | `PubSubHealthModule` | Optional `register()` dynamic module — wires `HEALTH_PUBSUB_CLIENT` with dynamic `@google-cloud/pubsub` load |
+| `FirestoreHealthCheck` | Built-in: single doc `get()` on `__health/__probe` via `FirestorePingClient` (`HEALTH_FIRESTORE_CLIENT`) |
+| `HEALTH_FIRESTORE_CLIENT` | Injection token for Admin SDK Firestore used by `FirestoreHealthCheck` |
+| `FIRESTORE_HEALTH_PROBE_COLLECTION` / `FIRESTORE_HEALTH_PROBE_DOC` | Probe path constants (defaults `__health` / `__probe`) |
+| `FirestorePingClient` | Minimal type matching `admin.firestore()` (collection → doc → get) |
+| `FirestoreHealthModule` | Optional `register()` — wires Firestore from `firebase-admin` after `initializeApp` |
 
 ## Built-in checks
 
@@ -111,6 +116,37 @@ import {
 })
 export class AppModule {}
 ```
+
+### `FirestoreHealthCheck`
+
+- **Requires:** A `Firestore` instance from **`firebase-admin`** (`admin.firestore()`), bound to **`HEALTH_FIRESTORE_CLIENT`**, or **`FirestoreHealthModule.register()`** after your app has called **`admin.initializeApp(...)`**.
+- **Behavior:** Read-only `get()` on **`FIRESTORE_HEALTH_PROBE_COLLECTION`** / **`FIRESTORE_HEALTH_PROBE_DOC`** (defaults `__health` / `__probe`). The document does not need to exist. 3s timeout. If no client, fails with `"Firestore not configured"`.
+- **consumer-api / PLA-879:** Firestore is only available through the Admin SDK in many apps — use the same initialization order as production (bootstrap Firebase, then import health).
+
+```typescript
+import {
+  HealthModule,
+  FirestoreHealthCheck,
+  FirestoreHealthModule,
+  DatabaseHealthCheck,
+} from '@momentco/nestjs-common';
+
+@Module({
+  imports: [
+    HealthModule.forRoot({
+      imports: [FirestoreHealthModule.register()],
+      checks: [
+        { key: 'database', useClass: DatabaseHealthCheck },
+        { key: 'firestore', useClass: FirestoreHealthCheck },
+      ],
+      criticalKeys: ['database'],
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+Use **`FirestoreHealthModule.register({ appName: 'my-app' })`** if you use a named Firebase app.
 
 ## Aggregation rules
 
@@ -261,15 +297,15 @@ If you need a second route (for example internal vs public), you can keep using 
 - **Unit tests:** Mock each `HealthCheck` with `useValue: { check: jest.fn() }` and register them as you would any provider, or test `aggregateHealth` directly with a fake `Record<string, HealthCheckDetail>`.
 - **E2E:** Bootstrap `HealthModule.forRoot({ ... })` with a test app and `GET` the configured path.
 
-In this repository, unit tests that mirror this document live under `test/unit/`: `health.module.spec.ts` (HTTP module, `forRoot` / `forRootAsync`, env identity, mocks), `aggregate-health.spec.ts`, `health.options.spec.ts` (`assertHealthModuleOptions`), `health.utils.spec.ts` (`rejectAfter`), `database.health.spec.ts`, `redis.health.spec.ts`, `pubsub.health.spec.ts`, `redis-health.module.spec.ts`, and `pubsub-health.module.spec.ts`.
+In this repository, unit tests that mirror this document live under `test/unit/`: `health.module.spec.ts` (HTTP module, `forRoot` / `forRootAsync`, env identity, mocks), `aggregate-health.spec.ts`, `health.options.spec.ts` (`assertHealthModuleOptions`), `health.utils.spec.ts` (`rejectAfter`), `database.health.spec.ts`, `redis.health.spec.ts`, `pubsub.health.spec.ts`, `firestore.health.spec.ts`, `redis-health.module.spec.ts`, `pubsub-health.module.spec.ts`, and `firestore-health.module.spec.ts`.
 
 ## Related
 
 - Source layout under `src/health/`:
   - `core/` — DTO/types, `aggregateHealth`, module options, `HEALTH_MODULE_OPTIONS`, `rejectAfter`
   - `http/` — `HealthAggregatorService`, `createHealthController`
-  - `checks/` — built-in probes (`DatabaseHealthCheck`, `RedisHealthCheck`, `PubSubHealthCheck`, …)
-  - `providers/` — `RedisHealthModule`, `PubSubHealthModule` (`register()` helpers)
+  - `checks/` — built-in probes (`DatabaseHealthCheck`, `RedisHealthCheck`, `PubSubHealthCheck`, `FirestoreHealthCheck`, …)
+  - `providers/` — `RedisHealthModule`, `PubSubHealthModule`, `FirestoreHealthModule` (`register()` helpers)
   - `health.module.ts` — dynamic Nest module
   - `index.ts` — feature barrel re-exports
 - `@nestjs/terminus` is not used. The HTTP controller adds OpenAPI metadata when `@nestjs/swagger` is installed (optional peer); otherwise decorators are no-ops.

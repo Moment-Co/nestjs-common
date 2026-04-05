@@ -2,6 +2,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PubSubHealthModule } from '../../src/health/providers/pubsub-health.module';
 import { HEALTH_PUBSUB_CLIENT } from '../../src/health/checks/pubsub.health';
 
+function isPubSubResolvable(): boolean {
+  try {
+    require.resolve('@google-cloud/pubsub');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe('PubSubHealthModule', () => {
   const prevGcp = process.env.GCP_PROJECT_ID;
   const prevGoogle = process.env.GOOGLE_CLOUD_PROJECT;
@@ -13,7 +22,7 @@ describe('PubSubHealthModule', () => {
     else process.env.GOOGLE_CLOUD_PROJECT = prevGoogle;
   });
 
-  it('register() provides undefined client when no project id and optional pubsub is absent', async () => {
+  it('register() provides undefined client when no project id', async () => {
     delete process.env.GCP_PROJECT_ID;
     delete process.env.GOOGLE_CLOUD_PROJECT;
 
@@ -24,7 +33,7 @@ describe('PubSubHealthModule', () => {
     expect(moduleRef.get(HEALTH_PUBSUB_CLIENT)).toBeUndefined();
   });
 
-  it('register({ projectId }) falls back to undefined when @google-cloud/pubsub cannot be loaded', async () => {
+  it('register({ projectId }) provides PubSub when @google-cloud/pubsub is installed', async () => {
     delete process.env.GCP_PROJECT_ID;
     delete process.env.GOOGLE_CLOUD_PROJECT;
 
@@ -32,7 +41,13 @@ describe('PubSubHealthModule', () => {
       imports: [PubSubHealthModule.register({ projectId: 'test-project' })],
     }).compile();
 
-    expect(moduleRef.get(HEALTH_PUBSUB_CLIENT)).toBeUndefined();
+    const client = moduleRef.get(HEALTH_PUBSUB_CLIENT);
+    if (isPubSubResolvable()) {
+      expect(client).toBeDefined();
+      expect((client as { projectId?: string }).projectId).toBe('test-project');
+    } else {
+      expect(client).toBeUndefined();
+    }
   });
 
   it('uses GOOGLE_CLOUD_PROJECT when GCP_PROJECT_ID is unset', async () => {
@@ -43,6 +58,12 @@ describe('PubSubHealthModule', () => {
       imports: [PubSubHealthModule.register()],
     }).compile();
 
-    expect(moduleRef.get(HEALTH_PUBSUB_CLIENT)).toBeUndefined();
+    const client = moduleRef.get(HEALTH_PUBSUB_CLIENT);
+    if (isPubSubResolvable()) {
+      expect(client).toBeDefined();
+      expect((client as { projectId?: string }).projectId).toBe('only-google');
+    } else {
+      expect(client).toBeUndefined();
+    }
   });
 });

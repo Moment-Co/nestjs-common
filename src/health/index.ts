@@ -3,7 +3,7 @@
  * - `core/` — types, aggregation, module options, tokens, utils
  * - `http/` — HTTP controller and aggregator service
  * - `checks/` — built-in probes (database, redis, pubsub, …)
- * - `providers/` — optional `register()` helpers for Redis / Pub/Sub clients
+ * - `providers/` — optional `register()` helpers for Redis / Pub/Sub / Firestore clients
  */
 
 export type {
@@ -33,9 +33,20 @@ export {
   type PubSubPingClient,
 } from './checks/pubsub.health';
 export {
+  FirestoreHealthCheck,
+  HEALTH_FIRESTORE_CLIENT,
+  FIRESTORE_HEALTH_PROBE_COLLECTION,
+  FIRESTORE_HEALTH_PROBE_DOC,
+  type FirestorePingClient,
+} from './checks/firestore.health';
+export {
   PubSubHealthModule,
   type PubSubHealthModuleOptions,
 } from './providers/pubsub-health.module';
+export {
+  FirestoreHealthModule,
+  type FirestoreHealthModuleOptions,
+} from './providers/firestore-health.module';
 export {
   RedisHealthModule,
   type RedisHealthModuleOptions,
