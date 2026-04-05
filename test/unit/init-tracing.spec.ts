@@ -8,7 +8,7 @@ jest.mock('@opentelemetry/sdk-node', () => {
   };
 });
 jest.mock('@opentelemetry/resources', () => ({
-  Resource: jest.fn().mockImplementation((attrs: unknown) => ({ attrs })),
+  resourceFromAttributes: jest.fn().mockImplementation((attrs: unknown) => ({ attrs })),
 }));
 jest.mock('@opentelemetry/semantic-conventions', () => ({
   ATTR_SERVICE_NAME: 'service.name',
@@ -66,11 +66,11 @@ describe('initTracing', () => {
   });
 
   it('passes serviceName and serviceVersion as resource attributes', () => {
-    const { Resource } = require('@opentelemetry/resources');
+    const { resourceFromAttributes } = require('@opentelemetry/resources');
 
     initTracing({ serviceName: 'api', serviceVersion: '1.2.3', enabled: true });
 
-    expect(Resource).toHaveBeenCalledWith(
+    expect(resourceFromAttributes).toHaveBeenCalledWith(
       expect.objectContaining({
         'service.name': 'api',
         'service.version': '1.2.3',
