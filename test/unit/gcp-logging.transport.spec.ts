@@ -32,6 +32,13 @@ describe('createGcpLoggingTransport', () => {
     expect(MockLoggingWinston).toHaveBeenCalledTimes(1);
   });
 
+  it('always passes redirectToStdout: true to LoggingWinston', () => {
+    const transport = createGcpLoggingTransport({ enabled: true });
+
+    expect(transport).toBeDefined();
+    expect(MockLoggingWinston).toHaveBeenCalledWith({ redirectToStdout: true });
+  });
+
   it('returns a transport when K_SERVICE is set', () => {
     process.env.K_SERVICE = 'svc';
 
@@ -47,6 +54,6 @@ describe('createGcpLoggingTransport', () => {
     });
 
     expect(transport).toBeDefined();
-    expect(MockLoggingWinston).toHaveBeenCalledWith({ projectId: 'my-project' });
+    expect(MockLoggingWinston).toHaveBeenCalledWith({ projectId: 'my-project', redirectToStdout: true });
   });
 });
