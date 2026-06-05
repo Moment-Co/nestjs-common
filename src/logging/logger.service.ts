@@ -1,6 +1,7 @@
 import { Injectable, LoggerService as NestLoggerService, Optional } from '@nestjs/common';
 import * as winston from 'winston';
 import { getRequestId } from './request-context';
+import { isGcpEnvironment } from '../telemetry/telemetry.types';
 
 export interface LoggerOptions {
   service: string;
@@ -13,6 +14,16 @@ export interface LoggerOptions {
 export function createLogger(options: LoggerOptions): winston.Logger {
   const isDev = process.env.NODE_ENV !== 'production';
   const level = options.level ?? process.env.LOG_LEVEL ?? 'info';
+
+  const extraTransports = (options.transports ?? []).filter(
+    (t): t is winston.transport => !!t,
+  );
+  // In GCP with an explicit transport (e.g. LoggingWinston redirectToStdout),
+  // Console would duplicate every log line to stdout. Skip it.
+  const defaultTransports =
+    isGcpEnvironment() && extraTransports.length > 0
+      ? []
+      : [new winston.transports.Console()];
 
   return winston.createLogger({
     level,
@@ -29,10 +40,7 @@ export function createLogger(options: LoggerOptions): winston.Logger {
           winston.format.timestamp(),
           winston.format.json(),
         ),
-    transports: [
-      new winston.transports.Console(),
-      ...(options.transports ?? []).filter((t): t is winston.transport => !!t),
-    ],
+    transports: [...defaultTransports, ...extraTransports],
   });
 }
 
