@@ -18,9 +18,10 @@ export function createGcpLoggingTransport(
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { LoggingWinston } = require('@google-cloud/logging-winston');
-    return new LoggingWinston(
-      options?.gcpProjectId ? { projectId: options.gcpProjectId } : undefined,
-    );
+    return new LoggingWinston({
+      ...(options?.gcpProjectId ? { projectId: options.gcpProjectId } : {}),
+      redirectToStdout: true,
+    });
   } catch {
     return undefined;
   }
