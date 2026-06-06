@@ -43,6 +43,11 @@ export function initTracing(options: TracingOptions): void {
     instrumentations: [
       getNodeAutoInstrumentations({
         '@opentelemetry/instrumentation-fs': { enabled: false },
+        '@opentelemetry/instrumentation-dns': { enabled: process.env.ENABLE_OTEL_DNS === 'true' },
+        '@opentelemetry/instrumentation-net': { enabled: process.env.ENABLE_OTEL_NET === 'true' },
+        '@opentelemetry/instrumentation-grpc': { enabled: process.env.ENABLE_OTEL_GRPC === 'true' },
+        '@opentelemetry/instrumentation-runtime-node': { enabled: process.env.ENABLE_OTEL_RUNTIME_NODE === 'true' },
+        '@opentelemetry/instrumentation-winston': { enabled: process.env.ENABLE_OTEL_WINSTON === 'true' },
         ...(options.ignoreIncomingPaths && {
           '@opentelemetry/instrumentation-http': {
             ignoreIncomingPaths: options.ignoreIncomingPaths,
