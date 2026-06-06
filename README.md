@@ -11,6 +11,7 @@ Shared NestJS infrastructure library for Momentco services.
 - Database module helpers for Postgres + TypeORM
 - Request-id middleware
 - GCP telemetry: OpenTelemetry tracing/metrics, Cloud Logging, Error Reporting, Cloud Profiler
+- Runtime env var gates for all high-cost telemetry features (`ENABLE_PROFILER`, `ENABLE_OTEL_RUNTIME_NODE`, etc.)
 
 ## Install
 
