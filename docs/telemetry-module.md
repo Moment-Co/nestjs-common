@@ -25,7 +25,7 @@ GCP-native APM (Application Performance Monitoring) primitives: OpenTelemetry tr
 |-----------|-------|-----------------|-------------------|
 | Cloud Trace | Disabled | GCP | GCP |
 | Cloud Monitoring | Disabled | GCP | GCP |
-| Cloud Logging | Console only | Console + GCP | Console + GCP |
+| Cloud Logging | Console only | stdout → Cloud Logging | stdout → Cloud Logging |
 | Error Reporting | Console only | GCP | GCP |
 | Cloud Profiler | Disabled | GCP | GCP |
 
@@ -77,7 +77,9 @@ import { startProfiler } from '@momentco/nestjs-common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  await startProfiler({ serviceName: 'consumer-api' });
+  if (process.env.ENABLE_PROFILER === 'true') {
+    await startProfiler({ serviceName: 'consumer-api' });
+  }
 
   const app = await NestFactory.create(AppModule);
   // ... existing setup (middleware, pipes, etc.) ...
@@ -143,9 +145,24 @@ By default, all telemetry is **disabled** locally (no `K_SERVICE` env var). To e
 | `serviceVersion` | `string` | — | OTel resource `service.version` |
 | `ignoreIncomingPaths` | `(string \| RegExp)[]` | — | HTTP paths to exclude from tracing |
 
-When enabled, the SDK registers auto-instrumentations for HTTP, Express, `pg`, `ioredis`, and other common libraries (via `@opentelemetry/auto-instrumentations-node`). Filesystem instrumentation is disabled by default to reduce noise.
+When enabled, the SDK registers auto-instrumentations for HTTP, Express, `pg`, `ioredis`, and other common libraries (via `@opentelemetry/auto-instrumentations-node`). Several noisy instrumentations are **disabled by default** and can be opt-in via env vars — see [Runtime env vars](#runtime-env-vars) below.
 
 Graceful shutdown is wired to `SIGTERM` and `SIGINT`.
+
+## Runtime env vars
+
+All telemetry behaviours that have a meaningful performance cost can be toggled via env vars at deploy time without a code change.
+
+| Env var | Default | What it controls |
+|---------|---------|-----------------|
+| `ENABLE_PROFILER` | `false` | Cloud Profiler (CPU + heap flame graphs). Adds ~8-12s cold-start + periodic GC pauses. Enable for targeted debugging sessions only. |
+| `ENABLE_OTEL_RUNTIME_NODE` | `false` | OTel runtime metrics: event loop lag, GC pause duration, heap stats exported to Cloud Monitoring. Useful when investigating event loop saturation. |
+| `ENABLE_OTEL_DNS` | `false` | OTel DNS instrumentation. Adds spans for every DNS lookup; rarely actionable in Cloud Run. |
+| `ENABLE_OTEL_NET` | `false` | OTel TCP socket instrumentation. Low-level noise below HTTP/pg/ioredis spans. |
+| `ENABLE_OTEL_GRPC` | `false` | OTel gRPC instrumentation. In Moment services this only traces APM agent calls (meta-telemetry). |
+| `ENABLE_OTEL_WINSTON` | `false` | OTel Winston instrumentation — injects `trace_id`/`span_id` into log records. Cloud Run already provides log-trace correlation natively via `X-Cloud-Trace-Context`. |
+
+Set any of these to `'true'` on the Cloud Run service (or locally in `.env`) to enable.
 
 ## `startProfiler` details
 
