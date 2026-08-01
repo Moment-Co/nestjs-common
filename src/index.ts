@@ -10,6 +10,10 @@ export {
   PoolConfig,
   POSTGRES_DATABASE_DEFAULTS,
 } from './database/database.config';
+export {
+  DatabasePoolMonitorService,
+  DB_POOL_WAIT_LOG_THRESHOLD_MS_DEFAULT,
+} from './database/database-pool-monitor.service';
 
 // HTTP Client
 export { HttpClientModule } from './http-client/http-client.module';
@@ -27,7 +31,7 @@ export { ExternalHttpError, HttpClientException, HttpErrorType } from './http-cl
 
 // Logging — NestJS
 export { LoggerModule } from './logging/logger.module';
-export { MomentLogger, LoggerOptions } from './logging/logger.service';
+export { MomentLogger, LoggerOptions, LogContext } from './logging/logger.service';
 
 // Logging — Plain (for non-NestJS consumers)
 export { createLogger } from './logging/logger.service';

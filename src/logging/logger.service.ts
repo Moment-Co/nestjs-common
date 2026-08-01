@@ -36,6 +36,15 @@ export function createLogger(options: LoggerOptions): winston.Logger {
   });
 }
 
+/**
+ * `context` accepts a plain string (classic Nest context) or a structured
+ * args object — `logger.log('Static message', { userId, reason })` — which
+ * winston merges into the log entry as metadata (nested under `context`,
+ * matching the historical runtime behavior consumers already anchor metric
+ * filters on).
+ */
+export type LogContext = string | Record<string, unknown>;
+
 // NestJS wrapper
 @Injectable()
 export class MomentLogger implements NestLoggerService {
@@ -50,23 +59,23 @@ export class MomentLogger implements NestLoggerService {
     return requestId ? { requestId } : {};
   }
 
-  log(message: string, context?: string) {
+  log(message: string, context?: LogContext) {
     this.logger.info(message, { context, ...this.meta() });
   }
 
-  error(message: string, trace?: string, context?: string) {
+  error(message: string, trace?: unknown, context?: LogContext) {
     this.logger.error(message, { trace, context, ...this.meta() });
   }
 
-  warn(message: string, context?: string) {
+  warn(message: string, context?: LogContext) {
     this.logger.warn(message, { context, ...this.meta() });
   }
 
-  debug(message: string, context?: string) {
+  debug(message: string, context?: LogContext) {
     this.logger.debug(message, { context, ...this.meta() });
   }
 
-  verbose(message: string, context?: string) {
+  verbose(message: string, context?: LogContext) {
     this.logger.verbose(message, { context, ...this.meta() });
   }
 }
