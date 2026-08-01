@@ -49,6 +49,13 @@ type DatabaseModuleOptionsDiscrete = {
   entities: string[];
   migrations?: string[];
   migrationsTableName?: string;
+  /**
+   * Postgres `application_name` for this service's connections — makes them
+   * attributable in `pg_stat_activity`, the prerequisite for per-service
+   * connection monitoring on a shared instance. Takes precedence over an
+   * `application_name` query param in a connection URL.
+   */
+  applicationName?: string;
 } & Partial<DatabasePolicyOverrides>;
 
 type DatabaseModuleOptionsUrl = {
@@ -56,6 +63,8 @@ type DatabaseModuleOptionsUrl = {
   entities: string[];
   migrations?: string[];
   migrationsTableName?: string;
+  /** See `DatabaseModuleOptionsDiscrete.applicationName`. */
+  applicationName?: string;
 } & Partial<DatabasePolicyOverrides>;
 
 /** Discrete connection or `url` + `entities`; never both connection styles. */
@@ -161,6 +170,9 @@ export function buildPostgresTypeOrmOptions(options: DatabaseModuleOptions): Typ
     migrationsRun: options.migrationsRun ?? defaults.migrationsRun,
     retryAttempts: options.retryAttempts ?? defaults.retryAttempts,
     retryDelay: options.retryDelay ?? defaults.retryDelay,
+    ...(options.applicationName !== undefined
+      ? { applicationName: options.applicationName }
+      : {}),
     ...(options.migrations !== undefined ? { migrations: options.migrations } : {}),
     ...(options.migrationsTableName !== undefined
       ? { migrationsTableName: options.migrationsTableName }
