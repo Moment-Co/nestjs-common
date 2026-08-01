@@ -8,6 +8,7 @@ import {
   databaseEnvToModuleOptions,
   mergeDatabaseModuleOptions,
 } from './database.config';
+import { DatabasePoolMonitorService } from './database-pool-monitor.service';
 
 @Module({})
 export class DatabaseModule {
@@ -15,6 +16,7 @@ export class DatabaseModule {
     return {
       module: DatabaseModule,
       imports: [TypeOrmModule.forRoot(buildPostgresTypeOrmOptions(options))],
+      providers: [DatabasePoolMonitorService],
       exports: [TypeOrmModule],
     };
   }
@@ -45,6 +47,7 @@ export class DatabaseModule {
           inject: (options.inject as never[]) ?? [],
         }),
       ],
+      providers: [DatabasePoolMonitorService],
       exports: [TypeOrmModule],
     };
   }
