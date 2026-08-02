@@ -1,11 +1,25 @@
-import { DynamicModule, Module, ModuleMetadata, Provider } from '@nestjs/common';
+import { DynamicModule, Module, ModuleMetadata, Provider, Type } from '@nestjs/common';
 import { HealthAggregatorService } from './http/health-aggregator.service';
-import { createHealthController } from './http/health.controller';
+import {
+  createHealthController,
+  createLivenessController,
+} from './http/health.controller';
 import { HEALTH_MODULE_OPTIONS } from './core/constants';
 import {
   assertHealthModuleOptions,
   type HealthModuleOptions,
 } from './core/options';
+
+/**
+ * `readinessPath` unset → one combined controller at `path` (legacy).
+ * `readinessPath` set → liveness-only at `path`, checks at `readinessPath`.
+ */
+function buildControllers(path: string, readinessPath?: string): Type<unknown>[] {
+  if (readinessPath === undefined) {
+    return [createHealthController(path)];
+  }
+  return [createLivenessController(path), createHealthController(readinessPath)];
+}
 
 @Module({})
 export class HealthModule {
@@ -20,7 +34,7 @@ export class HealthModule {
     return {
       module: HealthModule,
       imports: options.imports ?? [],
-      controllers: [createHealthController(path)],
+      controllers: buildControllers(path, options.readinessPath),
       providers,
     };
   }
@@ -35,6 +49,8 @@ export class HealthModule {
     checks: HealthModuleOptions['checks'];
     /** HTTP path for the controller; not available from `useFactory` (route is fixed at compile time). */
     path?: string;
+    /** See {@link HealthModuleOptions.readinessPath}; route is fixed at compile time. */
+    readinessPath?: string;
     useFactory: (
       ...args: unknown[]
     ) =>
@@ -54,6 +70,7 @@ export class HealthModule {
             checks: options.checks,
             criticalKeys: partial.criticalKeys,
             path,
+            readinessPath: options.readinessPath,
           };
           assertHealthModuleOptions(merged);
           return merged;
@@ -64,7 +81,7 @@ export class HealthModule {
     return {
       module: HealthModule,
       imports: options.imports ?? [],
-      controllers: [createHealthController(path)],
+      controllers: buildControllers(path, options.readinessPath),
       providers,
     };
   }

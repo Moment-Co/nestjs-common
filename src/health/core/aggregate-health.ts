@@ -21,9 +21,11 @@ export function aggregateHealth(
   const criticalSet = new Set(criticalKeys);
   let hasCriticalFailure = false;
   let hasNonCriticalFailure = false;
+  const unhealthyServices: string[] = [];
 
   for (const [key, detail] of Object.entries(checks)) {
     if (detail.status === 'fail') {
+      unhealthyServices.push(key);
       if (criticalSet.has(key)) {
         hasCriticalFailure = true;
       } else {
@@ -53,6 +55,7 @@ export function aggregateHealth(
       version,
       timestamp: new Date().toISOString(),
       checks,
+      unhealthyServices,
     },
     httpStatus,
   };

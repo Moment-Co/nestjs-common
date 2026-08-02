@@ -146,6 +146,38 @@ describe('database.config', () => {
     ).toThrow('Config validation failed');
   });
 
+  it('forwards applicationName to the typeorm options (discrete and url)', () => {
+    const discrete = buildPostgresTypeOrmOptions({
+      host: 'localhost',
+      port: 5432,
+      username: 'user',
+      password: 'pass',
+      database: 'app_db',
+      entities: ['dist/**/*.entity.js'],
+      applicationName: 'consumer-api',
+    });
+    expect(discrete).toMatchObject({ applicationName: 'consumer-api' });
+
+    const viaUrl = buildPostgresTypeOrmOptions({
+      url: 'postgres://u:p@localhost:5432/mydb',
+      entities: ['dist/**/*.entity.js'],
+      applicationName: 'consumer-api',
+    });
+    expect(viaUrl).toMatchObject({ applicationName: 'consumer-api' });
+  });
+
+  it('omits applicationName when not provided', () => {
+    const result = buildPostgresTypeOrmOptions({
+      host: 'localhost',
+      port: 5432,
+      username: 'user',
+      password: 'pass',
+      database: 'app_db',
+      entities: ['dist/**/*.entity.js'],
+    });
+    expect(result).not.toHaveProperty('applicationName');
+  });
+
   it('builds options from connection url', () => {
     const result = buildPostgresTypeOrmOptions({
       url: 'postgres://u:p@localhost:5432/mydb',

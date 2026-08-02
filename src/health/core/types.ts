@@ -12,6 +12,11 @@ export interface HealthCheckResponse {
   version: string;
   timestamp: string;
   checks: Record<string, HealthCheckDetail>;
+  /**
+   * Keys of failing checks (e.g. `['redis']`) — lets an operator or uptime
+   * check read *which* dependency is down without parsing `checks`.
+   */
+  unhealthyServices: string[];
 }
 
 export interface AggregatedHealthResult {
