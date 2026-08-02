@@ -256,4 +256,82 @@ describe('HealthModule (docs: health-module.md)', () => {
       }),
     ).toThrow(/criticalKeys contains "missing"/);
   });
+
+  // Liveness/readiness split (monitoring plan §5.2): liveness must stay 200
+  // while a datastore is down — only readiness reports dependency health.
+  describe('readinessPath splits liveness and readiness', () => {
+    it('liveness stays 200 with no checks while readiness reports the failing datastore', async () => {
+      const moduleRef = await Test.createTestingModule({
+        imports: [
+          HealthModule.forRoot({
+            checks: [
+              { key: 'database', useClass: AlphaFailCheck },
+              { key: 'redis', useClass: BetaCheck },
+            ],
+            criticalKeys: ['database'],
+            path: 'health',
+            readinessPath: 'readiness',
+          }),
+        ],
+      }).compile();
+
+      const app = moduleRef.createNestApplication();
+      await app.listen(0);
+      const address = app.getHttpServer().address() as { port: number };
+
+      // Liveness: 200 despite the failing critical check — it must never
+      // consult dependencies (the restart-spiral fix).
+      const liveRes = await fetch(`http://127.0.0.1:${address.port}/health`);
+      expect(liveRes.status).toBe(200);
+      const liveBody = (await liveRes.json()) as {
+        status: string;
+        checks: Record<string, unknown>;
+        unhealthyServices: string[];
+      };
+      expect(liveBody.status).toBe('ok');
+      expect(liveBody.checks).toEqual({});
+      expect(liveBody.unhealthyServices).toEqual([]);
+
+      // Readiness: carries the checks, 503 on the critical failure, and
+      // names the failing datastore.
+      const readyRes = await fetch(`http://127.0.0.1:${address.port}/readiness`);
+      expect(readyRes.status).toBe(503);
+      const readyBody = (await readyRes.json()) as {
+        status: string;
+        unhealthyServices: string[];
+      };
+      expect(readyBody.status).toBe('fail');
+      expect(readyBody.unhealthyServices).toEqual(['database']);
+
+      await app.close();
+    });
+
+    it('forRootAsync supports the split too', async () => {
+      const moduleRef = await Test.createTestingModule({
+        imports: [
+          HealthModule.forRootAsync({
+            checks: [{ key: 'alpha', useClass: AlphaCheck }],
+            path: 'health',
+            readinessPath: 'readiness',
+            useFactory: async () => ({ criticalKeys: ['alpha'] }),
+            inject: [],
+          }),
+        ],
+      }).compile();
+
+      const app = moduleRef.createNestApplication();
+      await app.listen(0);
+      const address = app.getHttpServer().address() as { port: number };
+
+      expect((await fetch(`http://127.0.0.1:${address.port}/health`)).status).toBe(200);
+      const readyRes = await fetch(`http://127.0.0.1:${address.port}/readiness`);
+      expect(readyRes.status).toBe(200);
+      const readyBody = (await readyRes.json()) as {
+        checks: Record<string, unknown>;
+      };
+      expect(readyBody.checks).toHaveProperty('alpha');
+
+      await app.close();
+    });
+  });
 });

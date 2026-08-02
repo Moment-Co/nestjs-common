@@ -43,6 +43,42 @@ function resolveServiceVersion(fallback: string): string {
 }
 
 /**
+ * Builds a liveness-only controller for the given route path: "is the process
+ * up and serving HTTP" — no dependency checks, always 200. Used as the
+ * `path` endpoint when `readinessPath` splits the pair; the only endpoint
+ * that may ever be wired to platform restart behavior.
+ */
+export function createLivenessController(
+  path: string,
+): Type<{ getLiveness(): HealthCheckResponse }> {
+  @ApiTags('Health')
+  @Controller(path)
+  class MomentLivenessHttpController {
+    @Get()
+    @HttpCode(200)
+    @ApiOperation({
+      summary: 'Liveness check',
+      description:
+        'Process-level liveness only — no dependency checks (those live on the readiness endpoint). ' +
+        'Always HTTP 200 while the service can serve requests.',
+    })
+    @ApiResponse({ status: 200, description: 'Service process is up' })
+    getLiveness(): HealthCheckResponse {
+      return {
+        status: 'ok',
+        service: resolveServiceName('app'),
+        version: resolveServiceVersion('0.0.0'),
+        timestamp: new Date().toISOString(),
+        checks: {},
+        unhealthyServices: [],
+      };
+    }
+  }
+
+  return MomentLivenessHttpController;
+}
+
+/**
  * Builds a controller class for the given route path (e.g. `health`).
  */
 export function createHealthController(

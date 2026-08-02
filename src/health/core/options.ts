@@ -21,6 +21,22 @@ export interface HealthModuleOptions {
    */
   path?: string;
   /**
+   * When set (e.g. `'readiness'`), splits the endpoints:
+   *
+   * - `path` becomes **liveness-only** — "is the process up", no dependency
+   *   checks, always HTTP 200. The only endpoint that may ever influence
+   *   platform restart behavior.
+   * - `readinessPath` carries the registered dependency checks with the
+   *   critical/degraded aggregation and `unhealthyServices[]`. Observation
+   *   only — a slow datastore degrades readiness, it must never trigger
+   *   instance recycling.
+   *
+   * The pair self-diagnoses: liveness failing ⇒ service down; liveness
+   * passing + readiness failing ⇒ a datastore is down. When unset, `path`
+   * keeps the legacy combined behavior.
+   */
+  readinessPath?: string;
+  /**
    * Modules whose exported providers are visible to check classes (e.g. a module
    * that provides `HEALTH_REDIS_CLIENT` for a Redis check).
    */
