@@ -246,9 +246,56 @@ With **`forRootFromEnv`**, **`DB_POOL_*`** and **`DB_RETRY_*`** from env are app
 
 ---
 
+## 8.1 Extra pg driver options (`extra`)
+
+Driver settings that are not pool sizing — `statement_timeout`, `lock_timeout`,
+`application_name` fallbacks — go through **`extra`**, merged on top of the pool
+settings this module derives from `pool`:
+
+```ts
+DatabaseModule.forRootAsync({
+  inject: [AppConfigService],
+  useFactory: (cfg: AppConfigService) => ({
+    ...cfg.connection(),
+    entities: [__dirname + '/../**/*.entity{.ts,.js}'],
+    // Server-side per-statement cap. Merged into TypeORM's driver `extra`
+    // alongside max / min / idleTimeoutMillis / connectionTimeoutMillis.
+    extra: { statement_timeout: 30000 },
+  }),
+});
+```
+
+Resulting `extra`:
+
+```json
+{
+  "max": 8,
+  "min": 0,
+  "idleTimeoutMillis": 30000,
+  "connectionTimeoutMillis": 5000,
+  "statement_timeout": 30000
+}
+```
+
+**Pool-owned keys are rejected, not merged.** Setting `max`, `min`,
+`idleTimeoutMillis` or `connectionTimeoutMillis` inside `extra` throws:
+
+```
+DatabaseModuleOptions.extra must not set pool-owned keys (max); use pool instead
+```
+
+Pool sizing is the module's contract — a caller silently overriding `max` through
+`extra` would defeat the per-service connection budget with no signal. Use
+`pool` for those.
+
+`mergeDatabaseModuleOptions` deep-merges `extra` the same way it deep-merges
+`pool`, so a partial override never drops keys the base set.
+
+---
+
 ## 9. Helpers and types (optional)
 
-**Types:** **`DatabaseModuleOptions`** — discrete connection **or** `{ url, entities, ... }`; **`DatabaseModuleLayout`** — `entities` and optional migration paths; **`PoolConfig`** — `max` / `min` / `idleTimeoutMs` / `connectionTimeoutMs` for overrides.
+**Types:** **`DatabaseModuleOptions`** — discrete connection **or** `{ url, entities, ... }`, plus optional `applicationName` and `extra` (§8.1); **`DatabaseModuleLayout`** — `entities` and optional migration paths; **`PoolConfig`** — `max` / `min` / `idleTimeoutMs` / `connectionTimeoutMs` for overrides.
 
 | Export | When to use |
 |--------|-------------|

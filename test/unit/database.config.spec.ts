@@ -235,4 +235,92 @@ describe('database.config', () => {
     expect(result.extra?.min).toBe(1);
     expect(result.migrations).toEqual(['migrations/*.js']);
   });
+
+  it('merges extra pg driver options on top of the pool extra', () => {
+    const options = buildPostgresTypeOrmOptions({
+      host: 'localhost',
+      port: 5432,
+      username: 'u',
+      password: 'p',
+      database: 'db',
+      entities: [],
+      pool: { max: 8, min: 0 },
+      extra: { statement_timeout: 30000 },
+    });
+
+    const extra = (options as { extra: Record<string, unknown> }).extra;
+    expect(extra.statement_timeout).toBe(30000);
+    // Pool-derived keys survive the merge.
+    expect(extra.max).toBe(8);
+    expect(extra.min).toBe(0);
+    expect(extra.idleTimeoutMillis).toBeDefined();
+    expect(extra.connectionTimeoutMillis).toBeDefined();
+  });
+
+  it('supports extra on the url connection form', () => {
+    const options = buildPostgresTypeOrmOptions({
+      url: 'postgresql://u:p@localhost:5432/db',
+      entities: [],
+      extra: { statement_timeout: 15000, application_name_fallback: 'x' },
+    });
+
+    const extra = (options as { extra: Record<string, unknown> }).extra;
+    expect(extra.statement_timeout).toBe(15000);
+    expect(extra.application_name_fallback).toBe('x');
+    expect(extra.max).toBeDefined();
+  });
+
+  it('omits nothing and adds nothing when extra is not provided', () => {
+    const options = buildPostgresTypeOrmOptions({
+      host: 'localhost',
+      port: 5432,
+      username: 'u',
+      password: 'p',
+      database: 'db',
+      entities: [],
+      pool: { max: 8, min: 0, idleTimeoutMs: 30000, connectionTimeoutMs: 5000 },
+    });
+
+    expect((options as { extra: Record<string, unknown> }).extra).toEqual({
+      max: 8,
+      min: 0,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+  });
+
+  it.each(['max', 'min', 'idleTimeoutMillis', 'connectionTimeoutMillis'])(
+    'rejects extra.%s so the pool budget cannot be silently defeated',
+    (key) => {
+      expect(() =>
+        buildPostgresTypeOrmOptions({
+          host: 'localhost',
+          port: 5432,
+          username: 'u',
+          password: 'p',
+          database: 'db',
+          entities: [],
+          pool: { max: 8 },
+          extra: { [key]: 999 },
+        }),
+      ).toThrow(/must not set pool-owned keys/);
+    },
+  );
+
+  it('deep-merges extra in mergeDatabaseModuleOptions rather than replacing it', () => {
+    const merged = mergeDatabaseModuleOptions(
+      {
+        host: 'localhost',
+        port: 5432,
+        username: 'u',
+        password: 'p',
+        database: 'db',
+        entities: [],
+        extra: { statement_timeout: 30000, lock_timeout: 5000 },
+      },
+      { extra: { lock_timeout: 1000 } },
+    );
+
+    expect(merged.extra).toEqual({ statement_timeout: 30000, lock_timeout: 1000 });
+  });
 });

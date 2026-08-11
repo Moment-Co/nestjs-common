@@ -56,6 +56,13 @@ type DatabaseModuleOptionsDiscrete = {
    * `application_name` query param in a connection URL.
    */
   applicationName?: string;
+  /**
+   * Extra pg driver options merged into TypeORM's `extra`, on top of the pool
+   * settings this module derives from `pool` (e.g. `statement_timeout`).
+   * Pool-owned keys (max, min, idleTimeoutMillis, connectionTimeoutMillis) are
+   * rejected — set those through `pool`.
+   */
+  extra?: Record<string, unknown>;
 } & Partial<DatabasePolicyOverrides>;
 
 type DatabaseModuleOptionsUrl = {
@@ -65,6 +72,8 @@ type DatabaseModuleOptionsUrl = {
   migrationsTableName?: string;
   /** See `DatabaseModuleOptionsDiscrete.applicationName`. */
   applicationName?: string;
+  /** See `DatabaseModuleOptionsDiscrete.extra`. */
+  extra?: Record<string, unknown>;
 } & Partial<DatabasePolicyOverrides>;
 
 /** Discrete connection or `url` + `entities`; never both connection styles. */
@@ -83,6 +92,29 @@ function poolToExtra(pool: PoolConfig): Record<string, number> {
     idleTimeoutMillis: pool.idleTimeoutMs,
     connectionTimeoutMillis: pool.connectionTimeoutMs,
   };
+}
+
+/** Driver `extra` keys owned by `pool` — callers must not set these directly. */
+const POOL_OWNED_EXTRA_KEYS = [
+  'max',
+  'min',
+  'idleTimeoutMillis',
+  'connectionTimeoutMillis',
+] as const;
+
+/**
+ * Pool sizing is the module's contract — a caller silently overriding `max` via
+ * `extra` would defeat the per-service connection budget without any signal.
+ * Collisions are rejected rather than merged in either direction.
+ */
+function assertExtraDoesNotOverridePool(extra?: Record<string, unknown>): void {
+  if (!extra) return;
+  const collisions = POOL_OWNED_EXTRA_KEYS.filter((key) => key in extra);
+  if (collisions.length > 0) {
+    throw new Error(
+      `DatabaseModuleOptions.extra must not set pool-owned keys (${collisions.join(', ')}); use pool instead`,
+    );
+  }
 }
 
 function assertConnectionMode(options: DatabaseModuleOptions): void {
@@ -140,7 +172,14 @@ export function mergeDatabaseModuleOptions(
   overrides?: Partial<DatabaseModuleOptions>,
 ): DatabaseModuleOptions {
   if (!overrides) return base;
-  const merged = { ...base, ...overrides } as DatabaseModuleOptions;
+  let merged = { ...base, ...overrides } as DatabaseModuleOptions;
+  if (overrides.extra !== undefined) {
+    // Deep-merge like `pool`: a partial override must not drop keys the base set.
+    merged = {
+      ...merged,
+      extra: { ...(base.extra ?? {}), ...overrides.extra },
+    } as DatabaseModuleOptions;
+  }
   if (overrides.pool === undefined) {
     return merged;
   }
@@ -157,6 +196,7 @@ export function mergeDatabaseModuleOptions(
 /** Nest TypeORM options for Postgres; merges `POSTGRES_DATABASE_DEFAULTS`, discrete or `url` connection. */
 export function buildPostgresTypeOrmOptions(options: DatabaseModuleOptions): TypeOrmModuleOptions {
   assertConnectionMode(options);
+  assertExtraDoesNotOverridePool(options.extra);
   const defaults = POSTGRES_DATABASE_DEFAULTS;
   const pool: PoolConfig = { ...defaults.pool, ...options.pool };
   const ssl = options.ssl ?? defaults.ssl;
@@ -166,7 +206,7 @@ export function buildPostgresTypeOrmOptions(options: DatabaseModuleOptions): Typ
     entities: options.entities,
     synchronize: options.synchronize ?? defaults.synchronize,
     ssl: ssl ? { rejectUnauthorized: false } : false,
-    extra: poolToExtra(pool),
+    extra: { ...poolToExtra(pool), ...(options.extra ?? {}) },
     migrationsRun: options.migrationsRun ?? defaults.migrationsRun,
     retryAttempts: options.retryAttempts ?? defaults.retryAttempts,
     retryDelay: options.retryDelay ?? defaults.retryDelay,
