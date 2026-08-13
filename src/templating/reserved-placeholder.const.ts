@@ -6,5 +6,11 @@
  * `applyPlaceholders(content, context, { resolveReservedPrefixes: [...] })`.
  * Deny is the default so an early render pass leaves the namespace untouched
  * for a later pass that owns it.
+ *
+ * Frozen at runtime, not just `readonly` at compile time: the deferral check
+ * consults this policy, so a mutable export would let any consumer disable
+ * deny-by-default globally with a single `pop()`.
  */
-export const RESERVED_PLACEHOLDER_PREFIXES = ['subscription.'] as const;
+export const RESERVED_PLACEHOLDER_PREFIXES = Object.freeze([
+  'subscription.',
+] as const);

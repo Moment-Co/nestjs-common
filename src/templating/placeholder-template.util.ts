@@ -46,7 +46,9 @@
  * Keys under a `RESERVED_PLACEHOLDER_PREFIXES` namespace are DEFERRED — treated
  * as absent no matter what the context holds — unless the caller opts that
  * prefix in. This lets an earlier render pass hand the namespace through
- * untouched to a later pass that owns it. Because the hand-off is just a
+ * untouched to a later pass that owns it. The prefix list is frozen and this
+ * module holds a private copy of it, so the deferral rule cannot be switched
+ * off by mutating anything a consumer can reach. Because the hand-off is just a
  * string, the later pass cannot distinguish a deferred token the template
  * author wrote from placeholder-shaped text an earlier pass's VALUES
  * introduced — see the cross-pass note on `applyPlaceholders`.
@@ -74,6 +76,13 @@ export interface ApplyPlaceholdersOptions {
 // literal. Tightening this would change live rendering output, so it stays.
 const TOKEN_REGEX = /\{\{([#^/]?)([a-zA-Z0-9_.-]+)\}\}/g;
 
+// Module-private frozen snapshot of the policy, taken once at load. The check
+// below reads THIS, never the exported binding, so the deny-by-default rule
+// holds even if a consumer reaches the exported array and mutates it.
+const DEFERRED_PREFIXES: readonly string[] = Object.freeze([
+  ...RESERVED_PLACEHOLDER_PREFIXES,
+]);
+
 // A key is deferred when it sits under a reserved prefix the caller has not
 // opted into. Deny is the default: omitting `options` defers every reserved key.
 function isDeferredPlaceholderKey(
@@ -81,7 +90,7 @@ function isDeferredPlaceholderKey(
   options?: ApplyPlaceholdersOptions,
 ): boolean {
   const optedIn = options?.resolveReservedPrefixes;
-  return RESERVED_PLACEHOLDER_PREFIXES.some(
+  return DEFERRED_PREFIXES.some(
     (prefix) =>
       key.startsWith(prefix) && (optedIn == null || !optedIn.includes(prefix)),
   );

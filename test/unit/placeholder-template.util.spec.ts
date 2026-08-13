@@ -945,6 +945,113 @@ describe('reserved placeholder namespace', () => {
     });
   });
 
+  // GUARANTEE, not a limitation: the reserved-prefix policy is frozen at
+  // runtime and the engine holds a private copy of it, so deny-by-default
+  // cannot be switched off by mutating the exported array. Without this, any
+  // consumer could call RESERVED_PLACEHOLDER_PREFIXES.pop() and globally
+  // re-enable resolution of the namespace this PR exists to defer.
+  describe('GUARANTEE: the reserved prefix policy cannot be mutated by consumers', () => {
+    const valueTemplate = 'Playlist: {{subscription.playlist.name}}';
+    const sectionTemplate =
+      'A {{#subscription.active}}on {{subscription.plan}}{{/subscription.active}} B';
+
+    // Drops the compile-time `readonly` so the test can do what a JS consumer
+    // (or a consumer with a stray cast) would do at runtime.
+    function mutable(): string[] {
+      return RESERVED_PLACEHOLDER_PREFIXES as unknown as string[];
+    }
+
+    // Each mutation attempt either throws (frozen array in strict mode) or is a
+    // silent no-op; both are acceptable, a successful mutation is not.
+    function attempt(mutate: () => void): void {
+      try {
+        mutate();
+      } catch {
+        // Frozen-array TypeError in strict mode — the intended outcome.
+      }
+    }
+
+    it('the exported array is frozen', () => {
+      expect(Object.isFrozen(RESERVED_PLACEHOLDER_PREFIXES)).toBe(true);
+    });
+
+    it.each([
+      ['pop', () => mutable().pop()],
+      ['splice', () => mutable().splice(0, 1)],
+      ['push', () => mutable().push('other.')],
+      [
+        'index assignment',
+        () => {
+          mutable()[0] = 'other.';
+        },
+      ],
+      [
+        'length assignment',
+        () => {
+          mutable().length = 0;
+        },
+      ],
+    ])(
+      'leaves the policy intact after an attempted %s, and still defers',
+      (_label, mutate) => {
+        attempt(mutate as () => void);
+
+        // The policy itself survived.
+        expect(Array.from(RESERVED_PLACEHOLDER_PREFIXES)).toEqual([
+          'subscription.',
+        ]);
+
+        // A reserved VALUE token present in the context stays raw.
+        expect(
+          applyPlaceholders(
+            valueTemplate,
+            buildContext({
+              values: { 'subscription.playlist.name': 'Summer Mix' },
+            }),
+          ),
+        ).toBe(valueTemplate);
+
+        // A reserved SECTION present as `false` keeps its whole span rather
+        // than being deleted — the case a disabled policy would break.
+        expect(
+          applyPlaceholders(
+            sectionTemplate,
+            buildContext({
+              sections: { 'subscription.active': false },
+              values: { 'subscription.plan': 'pro' },
+            }),
+          ),
+        ).toBe(sectionTemplate);
+
+        // Opt-in still works, so freezing did not break the intended usage.
+        expect(
+          applyPlaceholders(
+            valueTemplate,
+            buildContext({
+              values: { 'subscription.playlist.name': 'Summer Mix' },
+            }),
+            { resolveReservedPrefixes: RESERVED_PLACEHOLDER_PREFIXES },
+          ),
+        ).toBe('Playlist: Summer Mix');
+      },
+    );
+
+    it('mutating a copy of the exported array does not affect deferral', () => {
+      const copy = [...RESERVED_PLACEHOLDER_PREFIXES];
+      copy.pop();
+      expect(copy).toEqual([]);
+
+      expect(
+        applyPlaceholders(
+          valueTemplate,
+          buildContext({
+            values: { 'subscription.playlist.name': 'Summer Mix' },
+          }),
+        ),
+      ).toBe(valueTemplate);
+    });
+  });
+
   // KNOWN LIMITATION, pinned here so it cannot change silently. Substituted
   // values are not re-scanned within a pass, but this engine is a plain string
   // transform with no provenance tracking, so placeholder-shaped text a pass-1
