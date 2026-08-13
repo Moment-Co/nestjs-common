@@ -944,4 +944,58 @@ describe('reserved placeholder namespace', () => {
       );
     });
   });
+
+  // KNOWN LIMITATION, pinned here so it cannot change silently. Substituted
+  // values are not re-scanned within a pass, but this engine is a plain string
+  // transform with no provenance tracking, so placeholder-shaped text a pass-1
+  // VALUE introduces becomes a real token to a pass-2 render of that output.
+  // These tests document what the engine does, not what we want it to do —
+  // sanitizing untrusted field values belongs at the pass-1 caller's boundary.
+  describe('KNOWN LIMITATION: pass-1 values can smuggle tokens into pass 2', () => {
+    it('LIMITATION: a reserved VALUE token injected by a pass-1 value resolves in an opted-in pass 2', () => {
+      const firstPass = applyPlaceholders(
+        'Plan: {{name}}',
+        buildContext({ values: { name: '{{subscription.plan}}' } }),
+      );
+      // Pass 1 defers the reserved namespace, so the injected token survives.
+      expect(firstPass).toBe('Plan: {{subscription.plan}}');
+
+      const secondPass = applyPlaceholders(
+        firstPass,
+        buildContext({ values: { 'subscription.plan': 'Gold' } }),
+        optIn,
+      );
+      expect(secondPass).toBe('Plan: Gold');
+    });
+
+    it('LIMITATION: a reserved SECTION injected by a pass-1 value is evaluated in an opted-in pass 2', () => {
+      const firstPass = applyPlaceholders(
+        'A{{name}}B',
+        buildContext({
+          values: {
+            name: '{{#subscription.perk}}PERK{{/subscription.perk}}',
+          },
+        }),
+      );
+      expect(firstPass).toBe(
+        'A{{#subscription.perk}}PERK{{/subscription.perk}}B',
+      );
+
+      expect(
+        applyPlaceholders(
+          firstPass,
+          buildContext({ sections: { 'subscription.perk': true } }),
+          optIn,
+        ),
+      ).toBe('APERKB');
+
+      expect(
+        applyPlaceholders(
+          firstPass,
+          buildContext({ sections: { 'subscription.perk': false } }),
+          optIn,
+        ),
+      ).toBe('AB');
+    });
+  });
 });

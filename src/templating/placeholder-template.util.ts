@@ -27,7 +27,10 @@
  * Keys under a `RESERVED_PLACEHOLDER_PREFIXES` namespace are DEFERRED — treated
  * as absent no matter what the context holds — unless the caller opts that
  * prefix in. This lets an earlier render pass hand the namespace through
- * untouched to a later pass that owns it.
+ * untouched to a later pass that owns it. Because the hand-off is just a
+ * string, the later pass cannot distinguish a deferred token the template
+ * author wrote from placeholder-shaped text an earlier pass's VALUES
+ * introduced — see the cross-pass note on `applyPlaceholders`.
  */
 
 import { RESERVED_PLACEHOLDER_PREFIXES } from './reserved-placeholder.const';
@@ -287,9 +290,26 @@ function resolveStandaloneTagSpan(
 
 /**
  * Applies placeholder resolution to `content` in a single recursive pass.
- * Idempotent for known tokens — resolved output no longer contains the consumed
- * tokens, and substituted values containing `{{...}}` are not re-resolved by a
- * second pass. Never throws on malformed input.
+ * Resolved output no longer contains the consumed tokens, and a substituted
+ * value is never re-scanned WITHIN the same pass — the tokenizer advances past
+ * whatever the value contained, so `{{...}}` text a value introduces is inert
+ * for the remainder of that pass.
+ *
+ * That guarantee does NOT extend across passes. This is a plain string
+ * transform with no provenance tracking: the output carries no record of which
+ * spans came from the template and which came from substituted values. So
+ * placeholder-shaped text introduced by one pass's values IS a real token to a
+ * subsequent pass over that output, including a reserved-namespace token that
+ * the later pass has opted into. A caller chaining passes (e.g. an early render
+ * that defers a namespace to a later render that owns it) must treat pass-1
+ * output as untrusted template text.
+ *
+ * Mitigation belongs at the pass-1 caller's input boundary, not here: reject or
+ * escape `{{` in author-supplied field values before they reach this engine.
+ * This function is pure and domain-agnostic, so it cannot tell an intentional
+ * template token from one smuggled in through a value.
+ *
+ * Never throws on malformed input.
  *
  * Pass `options.resolveReservedPrefixes` to resolve reserved-namespace keys this
  * pass owns; omitting `options` defers every reserved key.
