@@ -998,4 +998,64 @@ describe('reserved placeholder namespace', () => {
       ).toBe('AB');
     });
   });
+
+  // KNOWN LIMITATION, pinned here so it cannot change silently. The tokenizer
+  // matches `{{key}}` as a plain substring with no brace-boundary check, so
+  // Mustache's triple-brace (unescaped) syntax is consumed rather than passed
+  // through literally. These tests document what the engine does, not what we
+  // want it to do — tightening the regex would change live rendering output.
+  describe('KNOWN LIMITATION: extra braces around a token are consumed', () => {
+    it('LIMITATION: {{{x}}} substitutes and leaves one brace on each side literal', () => {
+      expect(
+        applyPlaceholders('{{{x}}}', buildContext({ values: { x: 'V' } })),
+      ).toBe('{V}');
+    });
+
+    it('LIMITATION: {{{{x}}}} substitutes and leaves two braces on each side literal', () => {
+      expect(
+        applyPlaceholders('{{{{x}}}}', buildContext({ values: { x: 'V' } })),
+      ).toBe('{{V}}');
+    });
+
+    it('LIMITATION: extra braces around section tags are consumed and stranded', () => {
+      // The stray brace before each open and after each close both survive, so
+      // the retained body ends up wrapped in `{}` pairs rather than `{...}`.
+      expect(
+        applyPlaceholders(
+          '{{{#k}}}IN{{{/k}}}',
+          buildContext({ sections: { k: true } }),
+        ),
+      ).toBe('{}IN{}');
+    });
+
+    it('braces that never close are left literal', () => {
+      expect(
+        applyPlaceholders('{{x} and {x}}', buildContext({ values: { x: 'V' } })),
+      ).toBe('{{x} and {x}}');
+    });
+  });
+
+  // KNOWN LIMITATION, pinned here so it cannot change silently. Rendering
+  // recurses once per retained nested section level and each level rescans
+  // forward for its own close tag, so stack depth grows with nesting depth and
+  // matching is quadratic in it. Deeply nested input throws `RangeError:
+  // Maximum call stack size exceeded` — measured at ~5,000 levels (~60KB) on
+  // default Node. That threshold is NOT asserted here: it is a property of the
+  // host's stack size, not of this code (depth 5,000 survives under
+  // `node --stack-size=4000`), and a depth large enough to overflow every
+  // runtime costs seconds per run. So this pins correct rendering at a modest
+  // depth instead, and callers taking untrusted input must bound size/nesting.
+  describe('KNOWN LIMITATION: nesting depth is unbounded', () => {
+    it('LIMITATION: renders deeply nested sections correctly at depth 50, with no internal depth cap to stop unbounded input', () => {
+      const depth = 50;
+      const template = `${'{{#k}}'.repeat(depth)}X${'{{/k}}'.repeat(depth)}`;
+
+      expect(
+        applyPlaceholders(template, buildContext({ sections: { k: true } })),
+      ).toBe('X');
+      expect(
+        applyPlaceholders(template, buildContext({ sections: { k: false } })),
+      ).toBe('');
+    });
+  });
 });

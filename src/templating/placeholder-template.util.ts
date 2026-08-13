@@ -6,6 +6,15 @@
  * - section open:     `{{#key}}` (positive) or `{{^key}}` (inverted)
  * - section close:    `{{/key}}`
  *
+ * Tokens are matched as SUBSTRINGS with no brace-boundary check, so a token is
+ * recognized whenever `{{key}}` occurs anywhere — INCLUDING when it is wrapped
+ * in further braces. Mustache's triple-brace (unescaped) syntax is therefore
+ * consumed rather than passed through: `{{{x}}}` renders as `{VALUE}` and
+ * `{{{{x}}}}` as `{{VALUE}}`, the surrounding braces surviving as literal text.
+ * Only a token whose braces never close (e.g. `{{x}`) stays literal. This is a
+ * KNOWN pre-existing limitation, pinned by tests; do not read the double-brace
+ * grammar above as a promise that extra-brace syntax is left alone.
+ *
  * Resolution is a SINGLE recursive left-to-right pass: literal text between
  * tokens is appended verbatim, values are substituted in place, and sections
  * recurse into their body only when kept. There is deliberately NO separate
@@ -23,6 +32,16 @@
  * (e.g. `{{block:UUID}}`, `{{link}}`) pass through untouched — the tokenizer
  * regex's key charset excludes `:` so `{{block:UUID}}` simply isn't a token.
  * The util imports zero domain types and never throws on malformed input.
+ *
+ * NESTING IS UNBOUNDED. Every retained nested section recurses into `render`,
+ * and each level also scans forward from its open tag to find its own close, so
+ * stack depth grows with nesting depth and matching cost is quadratic in it.
+ * Deeply nested input therefore exhausts the call stack — on default Node,
+ * ~5,000 nested `{{#k}}…{{/k}}` levels (~60KB) throws `RangeError: Maximum call
+ * stack size exceeded`, and the engine gets slow well before that. That
+ * `RangeError` is the one way this util does throw. There is deliberately no
+ * internal depth limit. Callers that accept untrusted or unbounded-size
+ * template input MUST bound input size and nesting depth BEFORE calling.
  *
  * Keys under a `RESERVED_PLACEHOLDER_PREFIXES` namespace are DEFERRED — treated
  * as absent no matter what the context holds — unless the caller opts that
@@ -49,7 +68,10 @@ export interface ApplyPlaceholdersOptions {
 // Single tokenizer for every placeholder kind: group 1 is the sigil
 // (`#`/`^`/`/` or empty for a value token), group 2 is the key. The key charset
 // excludes `#`, `^`, `/`, `:` so section sigils and `{{block:UUID}}` are not
-// captured as value keys, and partial braces pass through as literal text.
+// captured as value keys. There is NO brace-boundary assertion: the pattern
+// matches the inner `{{key}}` of `{{{key}}}` too, leaving the extra braces as
+// literal text around the substituted value. Only braces that never close stay
+// literal. Tightening this would change live rendering output, so it stays.
 const TOKEN_REGEX = /\{\{([#^/]?)([a-zA-Z0-9_.-]+)\}\}/g;
 
 // A key is deferred when it sits under a reserved prefix the caller has not
@@ -309,7 +331,9 @@ function resolveStandaloneTagSpan(
  * This function is pure and domain-agnostic, so it cannot tell an intentional
  * template token from one smuggled in through a value.
  *
- * Never throws on malformed input.
+ * Never throws on malformed input, with one exception: deeply nested sections
+ * exhaust the call stack and raise `RangeError` — see the nesting note on this
+ * file's header comment, and bound input size/nesting at the caller.
  *
  * Pass `options.resolveReservedPrefixes` to resolve reserved-namespace keys this
  * pass owns; omitting `options` defers every reserved key.
