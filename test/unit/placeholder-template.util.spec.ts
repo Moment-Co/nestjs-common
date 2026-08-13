@@ -1052,6 +1052,101 @@ describe('reserved placeholder namespace', () => {
     });
   });
 
+  // KNOWN LIMITATION, pinned here so it cannot change silently. A deferred
+  // section is preserved as a WHOLE span with no inner rendering, so a
+  // non-reserved token nested inside it — one pass 1 owns and could have
+  // resolved — is quarantined too and is later rendered against pass 2's
+  // context. Template authors must keep first-pass-owned tokens out of
+  // deferred sections; this is a constraint on the cross-service contract, not
+  // a bug to fix in the engine.
+  describe('KNOWN LIMITATION: a deferred section quarantines non-reserved tokens in its body', () => {
+    const template =
+      '{{#subscription.active}}Hi {{firstName}}{{/subscription.active}}';
+
+    it('LIMITATION: pass 1 preserves a non-reserved token nested in a deferred span, then pass 2 leaks it raw', () => {
+      // Pass 1 (publisher) owns `firstName` and has it in context, but the
+      // deferred span is copied verbatim, so it is never substituted.
+      const firstPass = applyPlaceholders(
+        template,
+        buildContext({
+          values: { firstName: 'Ada' },
+          sections: { 'subscription.active': true },
+        }),
+      );
+      expect(firstPass).toBe(template);
+
+      // Pass 2 (consumer) opts in and renders the body against ITS context,
+      // which has no `firstName` — so the token reaches end users raw.
+      expect(
+        applyPlaceholders(
+          firstPass,
+          buildContext({ sections: { 'subscription.active': true } }),
+          optIn,
+        ),
+      ).toBe('Hi {{firstName}}');
+    });
+  });
+
+  // KNOWN LIMITATION, pinned here so it cannot change silently. Deferral
+  // protects spans KEYED UNDER a reserved prefix; it does not protect reserved
+  // text that merely sits inside a first-pass-owned construct. When that
+  // construct discards its body, the body is dropped before the reserved token
+  // is ever tokenized, so the token is deleted with no opt-in.
+  describe('KNOWN LIMITATION: reserved tokens inside a discarded first-pass construct are deleted', () => {
+    it('LIMITATION: a reserved token inside a false publisher section is removed by pass 1 without opt-in', () => {
+      expect(
+        applyPlaceholders(
+          'A {{#ticket}}Plan: {{subscription.plan}}{{/ticket}} B',
+          buildContext({ sections: { ticket: false } }),
+        ),
+      ).toBe('A  B');
+    });
+
+    it('LIMITATION: a reserved token inside an empty publisher list is removed by pass 1 without opt-in', () => {
+      expect(
+        applyPlaceholders('A {{#items}}{{subscription.plan}}{{/items}} B', {
+          values: {},
+          sections: {},
+          lists: { items: [] },
+        }),
+      ).toBe('A  B');
+    });
+  });
+
+  // KNOWN LIMITATION, pinned here so it cannot change silently. Opt-in entries
+  // are matched for exact equality against RESERVED_PLACEHOLDER_PREFIXES, and
+  // the engine's never-throws contract means a mistyped prefix cannot be
+  // reported — it just silently opts into nothing.
+  describe('KNOWN LIMITATION: an opt-in prefix that is not an exact match is a silent no-op', () => {
+    it('LIMITATION: opting in with "subscription" (no trailing dot) resolves nothing and keeps tokens raw', () => {
+      const context = buildContext({
+        values: { 'subscription.plan': 'Gold' },
+        sections: { 'subscription.active': true },
+      });
+
+      expect(
+        applyPlaceholders('Plan: {{subscription.plan}}', context, {
+          resolveReservedPrefixes: ['subscription'],
+        }),
+      ).toBe('Plan: {{subscription.plan}}');
+
+      const sectionTemplate =
+        'A {{#subscription.active}}on{{/subscription.active}} B';
+      expect(
+        applyPlaceholders(sectionTemplate, context, {
+          resolveReservedPrefixes: ['subscription'],
+        }),
+      ).toBe(sectionTemplate);
+
+      // Passing the exported constant is what callers should do instead.
+      expect(
+        applyPlaceholders('Plan: {{subscription.plan}}', context, {
+          resolveReservedPrefixes: RESERVED_PLACEHOLDER_PREFIXES,
+        }),
+      ).toBe('Plan: Gold');
+    });
+  });
+
   // KNOWN LIMITATION, pinned here so it cannot change silently. Substituted
   // values are not re-scanned within a pass, but this engine is a plain string
   // transform with no provenance tracking, so placeholder-shaped text a pass-1

@@ -52,6 +52,29 @@
  * string, the later pass cannot distinguish a deferred token the template
  * author wrote from placeholder-shaped text an earlier pass's VALUES
  * introduced — see the cross-pass note on `applyPlaceholders`.
+ *
+ * Two boundaries of that deferral are easy to over-read, so state them exactly:
+ *
+ * 1. A deferred section's body is QUARANTINED, not selectively preserved. The
+ *    whole span (open + body + close) is copied verbatim with no inner
+ *    rendering, so a NON-reserved token nested inside it — one the first pass
+ *    owns and could resolve — is passed through untouched too, and is then
+ *    rendered against the SECOND pass's context. In
+ *    `{{#subscription.active}}Hi {{firstName}}{{/subscription.active}}`,
+ *    `{{firstName}}` survives pass 1 and leaks literally to end users unless
+ *    pass 2 also supplies `firstName`. Template authors must therefore place
+ *    inside a deferred section only tokens the SECOND-pass renderer can
+ *    resolve.
+ *
+ * 2. The no-delete guarantee covers spans KEYED UNDER a reserved prefix — it is
+ *    not a guarantee about reserved TEXT wherever it appears. A reserved token
+ *    positioned inside a first-pass-owned construct that discards its body is
+ *    deleted by that pass with no opt-in, because the body is dropped before
+ *    the reserved token is ever tokenized: `{{#ticket}}{{subscription.plan}}
+ *    {{/ticket}}` with `ticket: false`, an inverted section on the losing side,
+ *    or a `{{#items}}…{{/items}}` list that is empty all remove the reserved
+ *    token along with the body. Deferral protects the reserved key's own span,
+ *    nothing more.
  */
 
 import { RESERVED_PLACEHOLDER_PREFIXES } from './reserved-placeholder.const';
@@ -346,6 +369,19 @@ function resolveStandaloneTagSpan(
  *
  * Pass `options.resolveReservedPrefixes` to resolve reserved-namespace keys this
  * pass owns; omitting `options` defers every reserved key.
+ *
+ * Opt-in entries are compared for EXACT EQUALITY against the entries of
+ * `RESERVED_PLACEHOLDER_PREFIXES`, which include their trailing separator. A
+ * near miss such as `['subscription']` (no trailing dot) matches no entry and
+ * so opts into nothing — the pass silently keeps deferring, and if it was the
+ * last pass its raw `{{subscription.*}}` tokens reach end users. Because this
+ * function never throws on malformed input, a mistyped prefix cannot be
+ * reported; callers should pass the exported `RESERVED_PLACEHOLDER_PREFIXES`
+ * constant (or an element of it) rather than a hand-written string literal.
+ *
+ * Deferral has two documented boundaries — a deferred section quarantines its
+ * whole body, and reserved text inside a discarded first-pass construct is
+ * still deleted. Both are spelled out in this file's header comment.
  */
 export function applyPlaceholders(
   content: string,
