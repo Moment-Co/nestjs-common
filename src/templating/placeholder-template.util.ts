@@ -2,79 +2,32 @@
  * Generic, domain-agnostic mustache-style placeholder engine.
  *
  * Token grammar (key charset = `[a-zA-Z0-9_.-]+`):
- * - value token:     `{{key}}`
- * - section open:     `{{#key}}` (positive) or `{{^key}}` (inverted)
- * - section close:    `{{/key}}`
+ * - value token:    `{{key}}`
+ * - section open:   `{{#key}}` (positive) or `{{^key}}` (inverted)
+ * - section close:  `{{/key}}`
  *
- * Tokens are matched as SUBSTRINGS with no brace-boundary check, so a token is
- * recognized whenever `{{key}}` occurs anywhere — INCLUDING when it is wrapped
- * in further braces. Mustache's triple-brace (unescaped) syntax is therefore
- * consumed rather than passed through: `{{{x}}}` renders as `{VALUE}` and
- * `{{{{x}}}}` as `{{VALUE}}`, the surrounding braces surviving as literal text.
- * Only a token whose braces never close (e.g. `{{x}`) stays literal. This is a
- * KNOWN pre-existing limitation, pinned by tests; do not read the double-brace
- * grammar above as a promise that extra-brace syntax is left alone.
+ * Resolution is a SINGLE recursive left-to-right pass; there is deliberately no
+ * separate global value-substitution pass, so any region preserved literally
+ * (unknown key, unbalanced open) is never value-substituted. A section tag alone
+ * on its line takes that line with it (Mustache's standalone rule), as does an
+ * inline block alone on its line that renders to nothing.
  *
- * Resolution is a SINGLE recursive left-to-right pass: literal text between
- * tokens is appended verbatim, values are substituted in place, and sections
- * recurse into their body only when kept. There is deliberately NO separate
- * global value-substitution pass — so any region we choose to preserve literally
- * (unknown/typo'd section keys, unbalanced opens) is never value-substituted.
+ * Tokens match as substrings with no brace-boundary check, so extra braces are
+ * consumed: `{{{x}}}` renders `{VALUE}`. Nesting is unbounded and close-matching
+ * is quadratic in depth; deep input throws `RangeError`, the only throw here, so
+ * callers must bound untrusted input.
  *
- * A section tag alone on its line (only whitespace around it) has that whole
- * line removed — Mustache's standalone rule — so a section on its own line
- * leaves no blank line behind. An inline section block alone on its line that
- * renders to nothing collapses its line too, so an absent optional block never
- * leaves a blank line whether its tags are inline or on their own lines. Value
- * tokens are never standalone; a blank value still renders as a blank line.
+ * Keys under `RESERVED_PLACEHOLDER_PREFIXES` are DEFERRED: treated as ABSENT no
+ * matter what the context holds (so a reserved section present as `false` cannot
+ * delete its span), unless the caller opts that prefix in — handing the
+ * namespace untouched to a later pass that owns it. Two boundaries: a deferred
+ * section QUARANTINES its whole body, so non-reserved tokens nested inside go
+ * unresolved to the later pass; and deferral protects only the reserved key's
+ * own span, so reserved text inside a first-pass construct that discards its
+ * body is still deleted.
  *
- * Unknown keys are left literal so typos stay visible and unrelated tokens
- * (e.g. `{{block:UUID}}`, `{{link}}`) pass through untouched — the tokenizer
- * regex's key charset excludes `:` so `{{block:UUID}}` simply isn't a token.
- * The util imports zero domain types and never throws on malformed input.
- *
- * NESTING IS UNBOUNDED. Every retained nested section recurses into `render`,
- * and each level also scans forward from its open tag to find its own close, so
- * stack depth grows with nesting depth and matching cost is quadratic in it.
- * Deeply nested input therefore exhausts the call stack — on default Node,
- * ~5,000 nested `{{#k}}…{{/k}}` levels (~60KB) throws `RangeError: Maximum call
- * stack size exceeded`, and the engine gets slow well before that. That
- * `RangeError` is the one way this util does throw. There is deliberately no
- * internal depth limit. Callers that accept untrusted or unbounded-size
- * template input MUST bound input size and nesting depth BEFORE calling.
- *
- * Keys under a `RESERVED_PLACEHOLDER_PREFIXES` namespace are DEFERRED — treated
- * as absent no matter what the context holds — unless the caller opts that
- * prefix in. This lets an earlier render pass hand the namespace through
- * untouched to a later pass that owns it. The prefix list is frozen and this
- * module holds a private copy of it, so the deferral rule cannot be switched
- * off by mutating anything a consumer can reach. Because the hand-off is just a
- * string, the later pass cannot distinguish a deferred token the template
- * author wrote from placeholder-shaped text an earlier pass's VALUES
- * introduced — see the cross-pass note on `applyPlaceholders`.
- *
- * Two boundaries of that deferral are easy to over-read, so state them exactly:
- *
- * 1. A deferred section's body is QUARANTINED, not selectively preserved. The
- *    whole span (open + body + close) is copied verbatim with no inner
- *    rendering, so a NON-reserved token nested inside it — one the first pass
- *    owns and could resolve — is passed through untouched too, and is then
- *    rendered against the SECOND pass's context. In
- *    `{{#subscription.active}}Hi {{firstName}}{{/subscription.active}}`,
- *    `{{firstName}}` survives pass 1 and leaks literally to end users unless
- *    pass 2 also supplies `firstName`. Template authors must therefore place
- *    inside a deferred section only tokens the SECOND-pass renderer can
- *    resolve.
- *
- * 2. The no-delete guarantee covers spans KEYED UNDER a reserved prefix — it is
- *    not a guarantee about reserved TEXT wherever it appears. A reserved token
- *    positioned inside a first-pass-owned construct that discards its body is
- *    deleted by that pass with no opt-in, because the body is dropped before
- *    the reserved token is ever tokenized: `{{#ticket}}{{subscription.plan}}
- *    {{/ticket}}` with `ticket: false`, an inverted section on the losing side,
- *    or a `{{#items}}…{{/items}}` list that is empty all remove the reserved
- *    token along with the body. Deferral protects the reserved key's own span,
- *    nothing more.
+ * All of the above is pinned by the `LIMITATION:`-named tests in
+ * `test/unit/placeholder-template.util.spec.ts`.
  */
 
 import { RESERVED_PLACEHOLDER_PREFIXES } from './reserved-placeholder.const';
@@ -90,24 +43,18 @@ export interface ApplyPlaceholdersOptions {
   resolveReservedPrefixes?: readonly string[];
 }
 
-// Single tokenizer for every placeholder kind: group 1 is the sigil
-// (`#`/`^`/`/` or empty for a value token), group 2 is the key. The key charset
-// excludes `#`, `^`, `/`, `:` so section sigils and `{{block:UUID}}` are not
-// captured as value keys. There is NO brace-boundary assertion: the pattern
-// matches the inner `{{key}}` of `{{{key}}}` too, leaving the extra braces as
-// literal text around the substituted value. Only braces that never close stay
-// literal. Tightening this would change live rendering output, so it stays.
+// Group 1 is the sigil (`#`/`^`/`/`, empty for a value token), group 2 the key.
+// The key charset excludes `#`, `^`, `/`, `:`, so `{{block:UUID}}` is not a
+// token. Tightening the brace handling would change live output, so it stays.
 const TOKEN_REGEX = /\{\{([#^/]?)([a-zA-Z0-9_.-]+)\}\}/g;
 
-// Module-private frozen snapshot of the policy, taken once at load. The check
-// below reads THIS, never the exported binding, so the deny-by-default rule
-// holds even if a consumer reaches the exported array and mutates it.
+// Module-private frozen snapshot: the check below reads THIS, never the exported
+// binding, so a consumer cannot mutate deny-by-default away.
 const DEFERRED_PREFIXES: readonly string[] = Object.freeze([
   ...RESERVED_PLACEHOLDER_PREFIXES,
 ]);
 
-// A key is deferred when it sits under a reserved prefix the caller has not
-// opted into. Deny is the default: omitting `options` defers every reserved key.
+// Deny by default: omitting `options` defers every reserved key.
 function isDeferredPlaceholderKey(
   key: string,
   options?: ApplyPlaceholdersOptions,
@@ -119,12 +66,8 @@ function isDeferredPlaceholderKey(
   );
 }
 
-/**
- * Renders `content` against `context` in one recursive left-to-right pass.
- *
- * A fresh `RegExp` is built from `TOKEN_REGEX.source` on every call so the
- * stateful `lastIndex` is never shared across (re-entrant) renders.
- */
+// A fresh `RegExp` is built per call so the stateful `lastIndex` is never shared
+// across re-entrant renders.
 function render(
   content: string,
   context: PlaceholderContext,
@@ -143,8 +86,7 @@ function render(
     const deferred = isDeferredPlaceholderKey(key, options);
 
     if (sigil === '') {
-      // Value token: substitute known keys, leave unknown keys literal so typos
-      // stay visible. A deferred key is literal regardless of the context.
+      // Unknown or deferred keys stay literal regardless of the context.
       result += content.slice(cursor, tokenStart);
       result +=
         !deferred &&
@@ -156,27 +98,23 @@ function render(
     }
 
     if (sigil === '/') {
-      // Stray close with no matching open in this scope: append literally.
       result += content.slice(cursor, tokenStart);
       result += match[0];
       cursor = tokenEnd;
       continue;
     }
 
-    // Section open (`#` or `^`). Locate the depth-matched close for this key.
+    // Section open (`#` or `^`).
     const close = findMatchingSectionClose(content, key, tokenizer.lastIndex);
 
     if (close === null) {
-      // Unbalanced open: the remainder from this open to the end is malformed,
-      // so append it VERBATIM and stop rendering this scope (no substitution).
+      // Unbalanced open: append the malformed remainder VERBATIM, no rendering.
       result += content.slice(cursor);
       return result;
     }
 
-    // Precedence: list section > boolean section; unknown key stays literal.
-    // A deferred key takes the unknown branch even when the context defines it,
-    // so a reserved section present as `false` preserves its span rather than
-    // deleting it.
+    // Precedence: list > boolean. A deferred key takes the unknown branch even
+    // when the context defines it.
     const lists = context.lists;
     const listItems =
       !deferred &&
@@ -189,16 +127,15 @@ function render(
       !deferred && Object.prototype.hasOwnProperty.call(context.sections, key);
 
     if (!isList && !isBool) {
-      // Unknown section key: append the ENTIRE span (open + body + close)
-      // verbatim with no inner rendering, so a typo'd key stays visible.
+      // Unknown or deferred section key: append the ENTIRE span (open + body +
+      // close) verbatim with NO inner rendering. The deferral mechanism rests
+      // on this — nested non-reserved tokens are preserved too, not resolved.
       result += content.slice(cursor, close.closeEnd);
       cursor = close.closeEnd;
       tokenizer.lastIndex = close.closeEnd;
       continue;
     }
 
-    // Known section: trim standalone open/close tag lines, then render the body
-    // (per item for a list; once for a boolean/inverted) into `contribution`.
     const openSpan = resolveStandaloneTagSpan(content, tokenStart, tokenEnd);
     const closeSpan = resolveStandaloneTagSpan(
       content,
@@ -219,11 +156,9 @@ function render(
           );
         }
       } else if (items.length === 0) {
-        // Inverted list renders its body only when the list is empty.
         contribution = render(body, context, options);
       }
     } else {
-      // `#` renders its body iff the section is true; `^` iff false.
       const keepBody =
         sigil === '#' ? context.sections[key] : !context.sections[key];
       if (keepBody) {
@@ -232,8 +167,7 @@ function render(
     }
 
     // An inline block alone on ONE line that renders to nothing takes the whole
-    // line with it, so an absent optional block leaves no blank line. Requires
-    // both tags on the same line; a block spanning lines keeps its newlines.
+    // line with it; a block spanning lines keeps its newlines.
     const openInline =
       openSpan.trimmedStart === tokenStart && openSpan.trimmedEnd === tokenEnd;
     const closeInline =
@@ -261,23 +195,18 @@ function render(
     tokenizer.lastIndex = closeSpan.trimmedEnd;
   }
 
-  // Append any trailing literal text after the last token.
   result += content.slice(cursor);
   return result;
 }
 
 interface MatchingClose {
-  // Index in `content` where the matching `{{/key}}` token begins.
   closeStart: number;
-  // Index in `content` just after the matching `{{/key}}` token.
   closeEnd: number;
 }
 
-// Walks forward from `searchStart` tracking nesting depth of same-key section
-// tokens. Same-key opens (`#`/`^`) increment depth; same-key closes decrement.
-// The close that returns depth to 0 is the match — so nested same-key sections
-// bind the outer open to the LAST close, not the first. Returns null if no such
-// close exists (unbalanced). Tokens of other keys do not affect the depth.
+// Tracks nesting depth of same-key tokens from `searchStart`; the close that
+// returns depth to 0 is the match, so nested same-key sections bind the outer
+// open to the LAST close. Returns null when unbalanced.
 function findMatchingSectionClose(
   content: string,
   key: string,
@@ -315,9 +244,8 @@ function findMatchingSectionClose(
   return null;
 }
 
-// Returns the [trimmedStart, trimmedEnd) span to cut for a section tag. When the
-// tag is standalone (only whitespace on its line), the span swallows the line's
-// indentation and one trailing newline; when inline, it's just the tag itself.
+// Span to cut for a section tag: a standalone tag (only whitespace on its line)
+// swallows the line's indentation and one trailing newline; inline, just itself.
 function resolveStandaloneTagSpan(
   content: string,
   tagStart: number,
@@ -343,45 +271,17 @@ function resolveStandaloneTagSpan(
 }
 
 /**
- * Applies placeholder resolution to `content` in a single recursive pass.
- * Resolved output no longer contains the consumed tokens, and a substituted
- * value is never re-scanned WITHIN the same pass — the tokenizer advances past
- * whatever the value contained, so `{{...}}` text a value introduces is inert
- * for the remainder of that pass.
+ * Applies placeholder resolution to `content` in a single recursive pass. A
+ * substituted value is never re-scanned within that pass, but this is a plain
+ * string transform with no provenance tracking, so a caller chaining passes must
+ * treat pass-1 output as untrusted template text and reject or escape `{{` in
+ * author-supplied values at the pass-1 INPUT boundary.
  *
- * That guarantee does NOT extend across passes. This is a plain string
- * transform with no provenance tracking: the output carries no record of which
- * spans came from the template and which came from substituted values. So
- * placeholder-shaped text introduced by one pass's values IS a real token to a
- * subsequent pass over that output, including a reserved-namespace token that
- * the later pass has opted into. A caller chaining passes (e.g. an early render
- * that defers a namespace to a later render that owns it) must treat pass-1
- * output as untrusted template text.
- *
- * Mitigation belongs at the pass-1 caller's input boundary, not here: reject or
- * escape `{{` in author-supplied field values before they reach this engine.
- * This function is pure and domain-agnostic, so it cannot tell an intentional
- * template token from one smuggled in through a value.
- *
- * Never throws on malformed input, with one exception: deeply nested sections
- * exhaust the call stack and raise `RangeError` — see the nesting note on this
- * file's header comment, and bound input size/nesting at the caller.
- *
- * Pass `options.resolveReservedPrefixes` to resolve reserved-namespace keys this
- * pass owns; omitting `options` defers every reserved key.
- *
- * Opt-in entries are compared for EXACT EQUALITY against the entries of
- * `RESERVED_PLACEHOLDER_PREFIXES`, which include their trailing separator. A
- * near miss such as `['subscription']` (no trailing dot) matches no entry and
- * so opts into nothing — the pass silently keeps deferring, and if it was the
- * last pass its raw `{{subscription.*}}` tokens reach end users. Because this
- * function never throws on malformed input, a mistyped prefix cannot be
- * reported; callers should pass the exported `RESERVED_PLACEHOLDER_PREFIXES`
- * constant (or an element of it) rather than a hand-written string literal.
- *
- * Deferral has two documented boundaries — a deferred section quarantines its
- * whole body, and reserved text inside a discarded first-pass construct is
- * still deleted. Both are spelled out in this file's header comment.
+ * Pass `options.resolveReservedPrefixes` to resolve reserved keys this pass
+ * owns; omitting `options` defers every reserved key. Opt-in entries are matched
+ * by EXACT EQUALITY including the trailing separator — `['subscription']` opts
+ * into nothing and, since this never throws, fails silently; pass elements of
+ * the exported `RESERVED_PLACEHOLDER_PREFIXES` rather than string literals.
  */
 export function applyPlaceholders(
   content: string,
@@ -394,8 +294,8 @@ export function applyPlaceholders(
   return render(content, context, options);
 }
 
-// Merges contexts left-to-right (last wins); inputs never mutated. Pure data —
-// the reserved-namespace guard is applied at lookup time, not here.
+// Merges contexts left-to-right (last wins); inputs never mutated. The
+// reserved-namespace guard is applied at lookup time, not here.
 export function mergePlaceholderContexts(
   ...contexts: PlaceholderContext[]
 ): PlaceholderContext {
