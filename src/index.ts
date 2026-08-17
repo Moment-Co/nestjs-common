@@ -111,3 +111,12 @@ export { createGcpLoggingTransport } from './logging/gcp-logging.transport';
 
 // Middleware
 export { RequestIdMiddleware } from './middleware/request-id.middleware';
+
+// Templating
+export {
+  applyPlaceholders,
+  mergePlaceholderContexts,
+  PlaceholderContext,
+  ApplyPlaceholdersOptions,
+} from './templating/placeholder-template.util';
+export { RESERVED_PLACEHOLDER_PREFIXES } from './templating/reserved-placeholder.const';
