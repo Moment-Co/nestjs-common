@@ -119,4 +119,12 @@ export {
   PlaceholderContext,
   ApplyPlaceholdersOptions,
 } from './templating/placeholder-template.util';
-export { RESERVED_PLACEHOLDER_PREFIXES } from './templating/reserved-placeholder.const';
+export {
+  RESERVED_PLACEHOLDER_PREFIXES,
+  SUPPORTED_RESERVED_SECTION_KEYS,
+  SUPPORTED_RESERVED_VALUE_KEYS,
+} from './templating/reserved-placeholder.const';
+export type {
+  SupportedReservedSectionKey,
+  SupportedReservedValueKey,
+} from './templating/reserved-placeholder.const';
