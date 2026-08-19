@@ -33,5 +33,13 @@ export const SUPPORTED_RESERVED_SECTION_KEYS = Object.freeze([
 export const SUPPORTED_RESERVED_VALUE_KEYS = Object.freeze([
   'subscription.playlist.name',
   'subscription.playlist.liveLink',
+  'subscription.playlist.unfollowLink',
   'subscription.brand.name',
 ] as const);
+
+// Let a delivering service key an exhaustive resolver map off the contract, so a
+// key added here fails its build instead of shipping literal markup.
+export type SupportedReservedSectionKey =
+  (typeof SUPPORTED_RESERVED_SECTION_KEYS)[number];
+export type SupportedReservedValueKey =
+  (typeof SUPPORTED_RESERVED_VALUE_KEYS)[number];

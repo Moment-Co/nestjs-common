@@ -49,6 +49,7 @@ describe('subscription delivery contract', () => {
       expect([...SUPPORTED_RESERVED_VALUE_KEYS]).toEqual([
         'subscription.playlist.name',
         'subscription.playlist.liveLink',
+        'subscription.playlist.unfollowLink',
         'subscription.brand.name',
       ]);
     });
