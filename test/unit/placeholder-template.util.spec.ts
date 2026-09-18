@@ -1,5 +1,6 @@
 import {
   applyPlaceholders,
+  findTransformSpans,
   mergePlaceholderContexts,
   PlaceholderContext,
 } from '../../src/templating/placeholder-template.util';
@@ -1259,5 +1260,336 @@ describe('reserved placeholder namespace', () => {
         applyPlaceholders(template, buildContext({ sections: { k: false } })),
       ).toBe('');
     });
+  });
+});
+
+describe('applyPlaceholders transform spans', () => {
+  const uppercase = (body: string, arg: string): string =>
+    `[${arg}:${body.toUpperCase()}]`;
+
+  it('renders the body first, then hands it to the registered transform', () => {
+    expect(
+      applyPlaceholders(
+        '{{#shorten:tix}}go {{url}}{{/shorten:tix}}',
+        buildContext({ values: { url: 'https://a.co/x' } }),
+        { transforms: { shorten: uppercase } },
+      ),
+    ).toBe('[tix:GO HTTPS://A.CO/X]');
+  });
+
+  it('passes the arg through verbatim', () => {
+    const args: string[] = [];
+    applyPlaceholders(
+      '{{#shorten:a-1_b}}x{{/shorten:a-1_b}}',
+      buildContext(),
+      {
+        transforms: {
+          shorten: (body, arg) => {
+            args.push(arg);
+            return body;
+          },
+        },
+      },
+    );
+    expect(args).toEqual(['a-1_b']);
+  });
+
+  it('resolves sections nested inside the span before transforming', () => {
+    expect(
+      applyPlaceholders(
+        '{{#shorten:t}}{{#k}}in{{/k}}{{^k}}out{{/k}}{{/shorten:t}}',
+        buildContext({ sections: { k: true } }),
+        { transforms: { shorten: (body) => `<${body}>` } },
+      ),
+    ).toBe('<in>');
+  });
+
+  it('applies nested same-key spans inside out', () => {
+    expect(
+      applyPlaceholders(
+        '{{#s:outer}}A{{#s:inner}}B{{/s:inner}}{{/s:outer}}',
+        buildContext(),
+        { transforms: { s: (body, arg) => `${arg}(${body})` } },
+      ),
+    ).toBe('outer(Ainner(B))');
+  });
+
+  it('falls back to the rendered body when the transform throws', () => {
+    const template = '{{#shorten:t}}go {{url}}{{/shorten:t}}';
+    const context = buildContext({ values: { url: 'https://a.co/x' } });
+    const options = {
+      transforms: {
+        shorten: () => {
+          throw new Error('lookup failed');
+        },
+      },
+    };
+
+    expect(() => applyPlaceholders(template, context, options)).not.toThrow();
+    expect(applyPlaceholders(template, context, options)).toBe(
+      'go https://a.co/x',
+    );
+  });
+
+  it('reuses the standalone-tag rule: an identity transform matches a true section', () => {
+    const shapes = [
+      'A\n{{K}}body {{url}}{{/K}}\nB',
+      'A\n  {{K}}\nbody {{url}}\n  {{/K}}\nB',
+      'A {{K}}body{{/K}} B',
+      '{{K}}\n{{url}}\n{{/K}}',
+    ];
+
+    for (const shape of shapes) {
+      const transformed = applyPlaceholders(
+        shape.replace('{{K}}', '{{#s:t}}').replace('{{/K}}', '{{/s:t}}'),
+        buildContext({ values: { url: 'U' } }),
+        { transforms: { s: (body) => body } },
+      );
+      const section = applyPlaceholders(
+        shape.replace('{{K}}', '{{#k}}').replace('{{/K}}', '{{/k}}'),
+        buildContext({ values: { url: 'U' }, sections: { k: true } }),
+      );
+      expect(transformed).toBe(section);
+    }
+  });
+
+  it('collapses the line when the transform returns nothing, like a false section', () => {
+    const template = 'A\n{{#s:t}}body{{/s:t}}\nB';
+
+    expect(
+      applyPlaceholders(template, buildContext(), {
+        transforms: { s: () => '' },
+      }),
+    ).toBe('A\nB');
+    expect(
+      applyPlaceholders(
+        'A\n{{#k}}body{{/k}}\nB',
+        buildContext({ sections: { k: false } }),
+      ),
+    ).toBe('A\nB');
+  });
+
+  it('ignores a transform registered under a different key', () => {
+    expect(
+      applyPlaceholders('{{#shorten:t}}{{url}}{{/shorten:t}}', buildContext({
+        values: { url: 'U' },
+      }), { transforms: { other: uppercase } }),
+    ).toBe('{{#shorten:t}}U{{/shorten:t}}');
+  });
+
+  it('never transforms a value token or an inverted section', () => {
+    expect(
+      applyPlaceholders(
+        '{{shorten:t}} {{^shorten:t}}{{url}}{{/shorten:t}}',
+        buildContext({ values: { url: 'U', 'shorten:t': 'NEVER' } }),
+        { transforms: { shorten: uppercase } },
+      ),
+    ).toBe('{{shorten:t}} {{^shorten:t}}U{{/shorten:t}}');
+  });
+
+  it('leaves a bare {{#shorten}} section to the normal section rules', () => {
+    expect(
+      applyPlaceholders('{{#shorten}}{{url}}{{/shorten}}', buildContext({
+        values: { url: 'U' },
+      }), { transforms: { shorten: uppercase } }),
+    ).toBe('{{#shorten}}{{url}}{{/shorten}}');
+    expect(
+      applyPlaceholders(
+        '{{#shorten}}{{url}}{{/shorten}}',
+        buildContext({ values: { url: 'U' }, sections: { shorten: true } }),
+        { transforms: { shorten: uppercase } },
+      ),
+    ).toBe('U');
+  });
+
+  it('does not close a span with a mismatched arg, and stays inert', () => {
+    expect(
+      applyPlaceholders(
+        '{{#s:a}}{{url}}{{/s:b}} tail',
+        buildContext({ values: { url: 'U' } }),
+        { transforms: { s: uppercase } },
+      ),
+    ).toBe('{{#s:a}}U{{/s:b}} tail');
+  });
+
+  it('stays inert for an unclosed transform open, still rendering the rest', () => {
+    expect(
+      applyPlaceholders(
+        'pre {{#s:a}}rest {{url}}',
+        buildContext({ values: { url: 'U' } }),
+        { transforms: { s: uppercase } },
+      ),
+    ).toBe('pre {{#s:a}}rest U');
+  });
+
+  it('does not treat an inherited Object.prototype key as a transform', () => {
+    expect(
+      applyPlaceholders(
+        '{{#toString:t}}{{url}}{{/toString:t}}',
+        buildContext({ values: { url: 'U' } }),
+        { transforms: {} },
+      ),
+    ).toBe('{{#toString:t}}U{{/toString:t}}');
+  });
+});
+
+// Adding group 3 to the tokenizer makes arg-bearing text MATCH where it
+// previously did not, so every case below is pinned against output captured
+// from the pre-transform engine. Byte-identical output without a registered
+// transform is the whole safety argument for the colon: consumers on an older
+// version of this package must be unaffected.
+describe('transform grammar is inert without a transforms option', () => {
+  const context: PlaceholderContext = {
+    values: {
+      url: 'https://tickets.example.com/a/b?c=d',
+      block: 'BLOCK',
+      team: 'Heat',
+      a: 'AV',
+      'shorten:tag': 'NEVER',
+    },
+    sections: { k: true, shorten: true },
+  };
+
+  const cases: [string, string, string][] = [
+    [
+      'a UUID arg is not a token',
+      '{{block:550e8400-e29b-41d4-a716-446655440000}}',
+      '{{block:550e8400-e29b-41d4-a716-446655440000}}',
+    ],
+    ['a short arg value token stays literal', 'X{{a:b}}Y', 'X{{a:b}}Y'],
+    ['extra braces around an arg token', '{{{a:b}}}', '{{{a:b}}}'],
+    [
+      'a span keeps its tags literal and renders its body',
+      '{{#shorten:x}}Tickets: {{url}}{{/shorten:x}}',
+      '{{#shorten:x}}Tickets: https://tickets.example.com/a/b?c=d{{/shorten:x}}',
+    ],
+    [
+      'an inverted arg section keeps its tags literal and renders its body',
+      '{{^shorten:x}}B {{url}}{{/shorten:x}}',
+      '{{^shorten:x}}B https://tickets.example.com/a/b?c=d{{/shorten:x}}',
+    ],
+    ['a stray arg close stays literal', 'A{{/shorten:x}}B', 'A{{/shorten:x}}B'],
+    [
+      'stray colons in prose are untouched',
+      'Tip-off: 7:30 PM for {{team}}',
+      'Tip-off: 7:30 PM for Heat',
+    ],
+    [
+      'a colon inside a substituted value is untouched',
+      'Go to {{url}} now',
+      'Go to https://tickets.example.com/a/b?c=d now',
+    ],
+    [
+      'an arg token inside a retained section stays literal',
+      '{{#k}}A {{shorten:tag}} B{{/k}}',
+      'A {{shorten:tag}} B',
+    ],
+    [
+      'an arg token inside a dropped section is deleted',
+      '{{^k}}A {{shorten:tag}} B{{/k}}',
+      '',
+    ],
+    [
+      'a section nested in a span still resolves',
+      '{{#shorten:a}}[{{#k}}in{{/k}}]{{/shorten:a}}',
+      '{{#shorten:a}}[in]{{/shorten:a}}',
+    ],
+    [
+      'an unclosed span does not strand the remainder',
+      'pre {{#shorten:x}}rest {{url}}',
+      'pre {{#shorten:x}}rest https://tickets.example.com/a/b?c=d',
+    ],
+    [
+      'span tags alone on their lines keep their lines',
+      'L1\n{{#shorten:x}}\n{{url}}\n{{/shorten:x}}\nL2',
+      'L1\n{{#shorten:x}}\nhttps://tickets.example.com/a/b?c=d\n{{/shorten:x}}\nL2',
+    ],
+    [
+      'a mismatched arg close is literal on both sides',
+      '{{#shorten:a}}body{{/shorten:b}} {{url}}',
+      '{{#shorten:a}}body{{/shorten:b}} https://tickets.example.com/a/b?c=d',
+    ],
+    [
+      'an arg over 32 characters is not a token',
+      '{{block:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}}',
+      '{{block:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}}',
+    ],
+  ];
+
+  for (const [name, template, expected] of cases) {
+    it(`${name}, with no options`, () => {
+      expect(applyPlaceholders(template, context)).toBe(expected);
+    });
+
+    it(`${name}, with an empty transforms map`, () => {
+      expect(applyPlaceholders(template, context, { transforms: {} })).toBe(
+        expected,
+      );
+    });
+  }
+});
+
+describe('findTransformSpans', () => {
+  it('returns the tag offsets of an arg-bearing span', () => {
+    const content = 'pre {{#shorten:tix}}body{{/shorten:tix}} post';
+    expect(findTransformSpans(content, 'shorten')).toEqual([
+      {
+        key: 'shorten',
+        arg: 'tix',
+        openStart: 4,
+        openEnd: 20,
+        closeStart: 24,
+        closeEnd: 40,
+        body: 'body',
+      },
+    ]);
+    expect(content.slice(4, 20)).toBe('{{#shorten:tix}}');
+  });
+
+  it('reports a bare span with a null arg', () => {
+    const [span] = findTransformSpans('{{#shorten}}x{{/shorten}}', 'shorten');
+    expect(span.arg).toBeNull();
+    expect(span.body).toBe('x');
+  });
+
+  it('lets a caller splice a generated key into the opening tag', () => {
+    const content = 'a {{#shorten}}{{url}}{{/shorten}} b';
+    const [span] = findTransformSpans(content, 'shorten');
+    const injected =
+      content.slice(0, span.openStart) +
+      '{{#shorten:k1}}' +
+      content.slice(span.openEnd, span.closeStart) +
+      '{{/shorten:k1}}' +
+      content.slice(span.closeEnd);
+
+    expect(injected).toBe('a {{#shorten:k1}}{{url}}{{/shorten:k1}} b');
+  });
+
+  it('returns spans in document order, outer before inner', () => {
+    const spans = findTransformSpans(
+      '{{#s:a}}x{{#s:b}}y{{/s:b}}{{/s:a}} {{#s:c}}z{{/s:c}}',
+      's',
+    );
+    expect(spans.map((span) => span.arg)).toEqual(['a', 'b', 'c']);
+    expect(spans[1].openStart).toBe(9);
+  });
+
+  it('skips an unclosed open, a mismatched arg close and an inverted tag', () => {
+    expect(findTransformSpans('{{#s:a}}body', 's')).toEqual([]);
+    expect(findTransformSpans('{{#s:a}}body{{/s:b}}', 's')).toEqual([]);
+    expect(findTransformSpans('{{^s:a}}body{{/s:a}}', 's')).toEqual([]);
+  });
+
+  it('ignores other keys and returns nothing for plain text', () => {
+    expect(findTransformSpans('{{#other:a}}x{{/other:a}}', 's')).toEqual([]);
+    expect(findTransformSpans('no tokens here', 's')).toEqual([]);
+  });
+
+  it('does not render the body', () => {
+    const [span] = findTransformSpans(
+      '{{#s:a}}{{#k}}{{url}}{{/k}}{{/s:a}}',
+      's',
+    );
+    expect(span.body).toBe('{{#k}}{{url}}{{/k}}');
   });
 });
