@@ -5,6 +5,10 @@
  * - value token:    `{{key}}`
  * - section open:   `{{#key}}` (positive) or `{{^key}}` (inverted)
  * - section close:  `{{/key}}`
+ * - transform span: `{{#key:arg}}body{{/key:arg}}`, only when the caller passes
+ *   `options.transforms[key]`; the body renders normally and the result is
+ *   handed to that function. Close-matching compares the whole `key:arg`, so a
+ *   different arg does not close the span.
  *
  * Resolution is a SINGLE recursive left-to-right pass; there is deliberately no
  * separate global value-substitution pass, so any region preserved literally
@@ -38,15 +42,34 @@ export interface PlaceholderContext {
   lists?: Record<string, PlaceholderContext[]>; // each item is its own sub-context
 }
 
+// Called with the already-rendered body of a `{{#key:arg}}` span. Synchronous
+// because rendering is one synchronous recursive pass: a transform must be a
+// lookup, never I/O.
+export type PlaceholderTransformFn = (
+  renderedBody: string,
+  arg: string,
+) => string;
+
 export interface ApplyPlaceholdersOptions {
   // Reserved prefixes this render pass owns and should resolve normally.
   resolveReservedPrefixes?: readonly string[];
+  // Keyed by the part before the colon; absent key = the token stays literal.
+  transforms?: Readonly<Record<string, PlaceholderTransformFn>>;
 }
 
-// Group 1 is the sigil (`#`/`^`/`/`, empty for a value token), group 2 the key.
-// The key charset excludes `#`, `^`, `/`, `:`, so `{{block:UUID}}` is not a
-// token. Tightening the brace handling would change live output, so it stays.
-const TOKEN_REGEX = /\{\{([#^/]?)([a-zA-Z0-9_.-]+)\}\}/g;
+// Group 1 is the sigil (`#`/`^`/`/`, empty for a value token), group 2 the key,
+// group 3 the optional transform arg after a colon. Tightening the brace
+// handling would change live output, so it stays.
+//
+// `:` stays OUT of the key charset deliberately. Every already-deployed version
+// of this engine has no group 3 at all, so it sees `{{#shorten:x}}` as plain
+// text, renders the body normally and leaves only the literal tag wrappers —
+// version skew fails soft. Spelling the arg with a dot instead would make an
+// old engine read an unknown section and leak the whole span verbatim, inner
+// tokens unresolved. An arg with no registered transform is held to the same
+// bar here: emitted literally, with scanning continuing inside the span.
+const TOKEN_REGEX =
+  /\{\{([#^/]?)([a-zA-Z0-9_.-]+)(?::([a-zA-Z0-9_-]{1,32}))?\}\}/g;
 
 // Module-private frozen snapshot: the check below reads THIS, never the exported
 // binding, so a consumer cannot mutate deny-by-default away.
@@ -81,14 +104,17 @@ function render(
   while ((match = tokenizer.exec(content)) !== null) {
     const sigil = match[1];
     const key = match[2];
+    const arg = match[3];
     const tokenStart = match.index;
     const tokenEnd = tokenStart + match[0].length;
     const deferred = isDeferredPlaceholderKey(key, options);
 
     if (sigil === '') {
-      // Unknown or deferred keys stay literal regardless of the context.
+      // Unknown, deferred or arg-bearing keys stay literal regardless of the
+      // context; transforms apply to sections only.
       result += content.slice(cursor, tokenStart);
       result +=
+        arg === undefined &&
         !deferred &&
         Object.prototype.hasOwnProperty.call(context.values, key)
           ? context.values[key]
@@ -105,9 +131,47 @@ function render(
     }
 
     // Section open (`#` or `^`).
-    const close = findMatchingSectionClose(content, key, tokenizer.lastIndex);
+    let transform: PlaceholderTransformFn | undefined;
+    let transformArg = '';
+    if (sigil === '#' && arg !== undefined) {
+      const registered = options?.transforms;
+      if (
+        registered != null &&
+        Object.prototype.hasOwnProperty.call(registered, key)
+      ) {
+        const fn = registered[key];
+        if (typeof fn === 'function') {
+          transform = fn;
+          transformArg = arg;
+        }
+      }
+    }
+
+    if (arg !== undefined && transform === undefined) {
+      // No transform registered (and `{{^key:arg}}` never has one): emit the tag
+      // literally and keep scanning INSIDE the span, which is byte-for-byte what
+      // an engine without group 3 does. Inertness is the whole point of the
+      // colon, so it must not degrade into the verbatim-span branch below.
+      result += content.slice(cursor, tokenStart);
+      result += match[0];
+      cursor = tokenEnd;
+      continue;
+    }
+
+    // Close-matching is on the FULL `key:arg`, so `{{/k:b}}` cannot close
+    // `{{#k:a}}` and an arg-bearing open never nests into a bare one.
+    const tag = arg === undefined ? key : `${key}:${arg}`;
+    const close = findMatchingSectionClose(content, tag, tokenizer.lastIndex);
 
     if (close === null) {
+      if (transform !== undefined) {
+        // An unclosed transform open is not a span: stay inert rather than
+        // stranding the rest of the template unrendered.
+        result += content.slice(cursor, tokenStart);
+        result += match[0];
+        cursor = tokenEnd;
+        continue;
+      }
       // Unbalanced open: append the malformed remainder VERBATIM, no rendering.
       result += content.slice(cursor);
       return result;
@@ -117,6 +181,7 @@ function render(
     // when the context defines it.
     const lists = context.lists;
     const listItems =
+      transform === undefined &&
       !deferred &&
       lists != null &&
       Object.prototype.hasOwnProperty.call(lists, key)
@@ -124,9 +189,11 @@ function render(
         : undefined;
     const isList = listItems !== undefined;
     const isBool =
-      !deferred && Object.prototype.hasOwnProperty.call(context.sections, key);
+      transform === undefined &&
+      !deferred &&
+      Object.prototype.hasOwnProperty.call(context.sections, key);
 
-    if (!isList && !isBool) {
+    if (transform === undefined && !isList && !isBool) {
       // Unknown or deferred section key: append the ENTIRE span (open + body +
       // close) verbatim with NO inner rendering. The deferral mechanism rests
       // on this — nested non-reserved tokens are preserved too, not resolved.
@@ -145,7 +212,15 @@ function render(
     const body = content.slice(openSpan.trimmedEnd, closeSpan.trimmedStart);
 
     let contribution = '';
-    if (listItems !== undefined) {
+    if (transform !== undefined) {
+      const renderedBody = render(body, context, options);
+      try {
+        contribution = transform(renderedBody, transformArg);
+      } catch {
+        // The engine's never-throws contract outranks the transform.
+        contribution = renderedBody;
+      }
+    } else if (listItems !== undefined) {
       const items = listItems;
       if (sigil === '#') {
         for (const item of items) {
@@ -204,12 +279,13 @@ interface MatchingClose {
   closeEnd: number;
 }
 
-// Tracks nesting depth of same-key tokens from `searchStart`; the close that
-// returns depth to 0 is the match, so nested same-key sections bind the outer
-// open to the LAST close. Returns null when unbalanced.
+// Tracks nesting depth of same-tag tokens from `searchStart`; the close that
+// returns depth to 0 is the match, so nested same-tag sections bind the outer
+// open to the LAST close. `tag` is `key` or `key:arg`. Returns null when
+// unbalanced.
 function findMatchingSectionClose(
   content: string,
-  key: string,
+  tag: string,
   searchStart: number,
 ): MatchingClose | null {
   const tokenizer = new RegExp(TOKEN_REGEX.source, 'g');
@@ -220,8 +296,9 @@ function findMatchingSectionClose(
 
   while ((match = tokenizer.exec(content)) !== null) {
     const sigil = match[1];
-    const matchKey = match[2];
-    if (matchKey !== key) {
+    const matchTag =
+      match[3] === undefined ? match[2] : `${match[2]}:${match[3]}`;
+    if (matchTag !== tag) {
       continue;
     }
 
@@ -314,4 +391,75 @@ export function mergePlaceholderContexts(
   return hasLists
     ? { values, sections, lists: mergedLists }
     : { values, sections };
+}
+
+export interface TransformSpan {
+  key: string;
+  arg: string | null; // null for a bare `{{#key}}` span
+  openStart: number;
+  openEnd: number;
+  closeStart: number;
+  closeEnd: number;
+  body: string; // raw, unrendered
+}
+
+/**
+ * Finds every `{{#key:arg}}…{{/key:arg}}` and bare `{{#key}}…{{/key}}` span for
+ * one transform key in RAW template text, without rendering — for callers that
+ * normalise authored templates at save time.
+ *
+ * Offsets are the untrimmed tag bounds, so splicing `content` at
+ * `[openStart, openEnd)` rewrites exactly the opening tag; the renderer's
+ * standalone-line trimming is a render-time concern and is not applied here.
+ * Spans come out in document order, outer before inner, and mirror the
+ * renderer: same close-matching (full `key:arg`, outer binds to the LAST close),
+ * nested spans included, an unclosed open skipped, `{{^key:arg}}` ignored.
+ */
+export function findTransformSpans(
+  content: string,
+  key: string,
+): TransformSpan[] {
+  const spans: TransformSpan[] = [];
+  collectTransformSpans(content, key, 0, spans);
+  return spans;
+}
+
+function collectTransformSpans(
+  content: string,
+  key: string,
+  offset: number,
+  spans: TransformSpan[],
+): void {
+  const tokenizer = new RegExp(TOKEN_REGEX.source, 'g');
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenizer.exec(content)) !== null) {
+    if (match[1] !== '#' || match[2] !== key) {
+      continue;
+    }
+
+    const arg = match[3];
+    const tag = arg === undefined ? key : `${key}:${arg}`;
+    const close = findMatchingSectionClose(content, tag, tokenizer.lastIndex);
+
+    if (close === null) {
+      continue;
+    }
+
+    const openEnd = match.index + match[0].length;
+    const body = content.slice(openEnd, close.closeStart);
+
+    spans.push({
+      key,
+      arg: arg === undefined ? null : arg,
+      openStart: offset + match.index,
+      openEnd: offset + openEnd,
+      closeStart: offset + close.closeStart,
+      closeEnd: offset + close.closeEnd,
+      body,
+    });
+
+    collectTransformSpans(body, key, offset + openEnd, spans);
+    tokenizer.lastIndex = close.closeEnd;
+  }
 }

@@ -116,8 +116,11 @@ export { RequestIdMiddleware } from './middleware/request-id.middleware';
 export {
   applyPlaceholders,
   mergePlaceholderContexts,
+  findTransformSpans,
   PlaceholderContext,
   ApplyPlaceholdersOptions,
+  PlaceholderTransformFn,
+  TransformSpan,
 } from './templating/placeholder-template.util';
 export {
   RESERVED_PLACEHOLDER_PREFIXES,
