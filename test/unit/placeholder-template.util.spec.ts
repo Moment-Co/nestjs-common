@@ -13,6 +13,7 @@ function buildContext(
   return {
     values: partial.values ?? {},
     sections: partial.sections ?? {},
+    ...(partial.lists ? { lists: partial.lists } : {}),
   };
 }
 
@@ -1312,6 +1313,49 @@ describe('applyPlaceholders transform spans', () => {
         { transforms: { s: (body, arg) => `${arg}(${body})` } },
       ),
     ).toBe('outer(Ainner(B))');
+  });
+
+  it('passes the root context to a top-level transform', () => {
+    const shorten = (body: string, _arg: string, ctx: PlaceholderContext) =>
+      `${body}#${ctx.values['k.id']}`;
+
+    expect(
+      applyPlaceholders(
+        '{{#s:t}}x{{/s:t}}',
+        buildContext({ values: { 'k.id': 'root' } }),
+        { transforms: { s: shorten } },
+      ),
+    ).toBe('x#root');
+  });
+
+  it('passes each list item its own merged context to a transform', () => {
+    const shorten = (body: string, _arg: string, ctx: PlaceholderContext) =>
+      `${body}#${ctx.values['k.id']}`;
+    const context = buildContext({
+      values: { 'k.id': 'root' },
+      lists: {
+        k: [
+          buildContext({ values: { 'k.id': '1' } }),
+          buildContext({ values: { 'k.id': '2' } }),
+        ],
+      },
+    });
+
+    expect(
+      applyPlaceholders('{{#k}}[{{#s:t}}x{{/s:t}}]{{/k}}', context, {
+        transforms: { s: shorten },
+      }),
+    ).toBe('[x#1][x#2]');
+  });
+
+  it('still accepts a 2-arg transform', () => {
+    const twoArg = (body: string, arg: string): string => `${arg}:${body}`;
+
+    expect(
+      applyPlaceholders('{{#s:t}}x{{/s:t}}', buildContext(), {
+        transforms: { s: twoArg },
+      }),
+    ).toBe('t:x');
   });
 
   it('falls back to the rendered body when the transform throws', () => {

@@ -48,6 +48,7 @@ export interface PlaceholderContext {
 export type PlaceholderTransformFn = (
   renderedBody: string,
   arg: string,
+  context: PlaceholderContext,
 ) => string;
 
 export interface ApplyPlaceholdersOptions {
@@ -215,7 +216,7 @@ function render(
     if (transform !== undefined) {
       const renderedBody = render(body, context, options);
       try {
-        contribution = transform(renderedBody, transformArg);
+        contribution = transform(renderedBody, transformArg, context);
       } catch {
         // The engine's never-throws contract outranks the transform.
         contribution = renderedBody;
